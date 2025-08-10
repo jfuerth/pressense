@@ -1,7 +1,7 @@
 #ifndef STREAM_PROCESSOR_H
 #define STREAM_PROCESSOR_H
 
-#include "synth_channel_allocator.hpp"
+#include "synth_voice_allocator.hpp"
 #include "synth.hpp"
 #include <memory>
 
@@ -9,6 +9,8 @@ namespace midi {
 
   // MIDI Constants
   static constexpr uint8_t STATUS_BYTE_MASK = 0x80;
+  static constexpr uint8_t CHANNEL_MASK = 0x0F;
+  static constexpr uint8_t COMMAND_MASK = 0xF0;
   static constexpr uint8_t NOTE_ON_COMMAND = 0x90;
   static constexpr uint8_t NOTE_OFF_COMMAND = 0x80;
 
@@ -27,12 +29,14 @@ namespace midi {
   class StreamProcessor {
   public:
     /**
-     * @brief Construct a StreamProcessor with custom synth and channel allocator
+     * @brief Construct a StreamProcessor with custom synth and voice allocator
      * @param synth Unique pointer to the synthesizer implementation
-     * @param channelAllocator Unique pointer to the channel allocator implementation
+     * @param voiceAllocator Unique pointer to the voice allocator implementation
+     * @param listenChannel MIDI channel to listen to (0-15)
      */
     StreamProcessor(std::unique_ptr<Synth> synth, 
-                   std::unique_ptr<SynthChannelAllocator> channelAllocator);
+                   std::unique_ptr<SynthVoiceAllocator> voiceAllocator,
+                   uint8_t listenChannel = 0);
     
     /**
      * @brief Destructor for proper cleanup
@@ -52,11 +56,12 @@ namespace midi {
     std::unique_ptr<Synth> synth;
     
     /**
-     * @brief Channel allocator for managing synthesizer voices
+     * @brief Voice allocator for managing synthesizer voices
      */
-    std::unique_ptr<SynthChannelAllocator> synthChannelAllocator;
+    std::unique_ptr<SynthVoiceAllocator> synthVoiceAllocator;
 
     uint8_t currentCommand = 0; // Current MIDI command being processed
+    uint8_t listenChannel = 0;  // MIDI channel to listen to (0-15)
     
     // State for Note On message parsing
     enum NoteOnState {
@@ -69,6 +74,8 @@ namespace midi {
     
     // Helper methods for MIDI processing
     bool isStatusByte(uint8_t data) const;
+    uint8_t extractChannel(uint8_t statusByte) const;
+    uint8_t extractCommand(uint8_t statusByte) const;
     void handleStatusByte(uint8_t data);
     void handleDataByte(uint8_t data);
     void handleNoteOnDataByte(uint8_t data);

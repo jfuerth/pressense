@@ -1,73 +1,73 @@
-#ifndef SYNTH_CHANNEL_ALLOCATOR_H
-#define SYNTH_CHANNEL_ALLOCATOR_H
+#ifndef SYNTH_VOICE_ALLOCATOR_H
+#define SYNTH_VOICE_ALLOCATOR_H
 
 #include <cstdint>
 
 namespace midi {
 
   /**
-   * @brief Abstract base class for managing allocation of synthesizer channels for MIDI notes
+   * @brief Abstract base class for managing allocation of synthesizer voices for MIDI notes
    * 
    * This class provides the interface for mapping between MIDI notes and available
-   * synthesizer channels, ensuring efficient voice allocation for polyphonic synthesis.
+   * synthesizer voices, ensuring efficient voice allocation for polyphonic synthesis.
    */
-  class SynthChannelAllocator {
+  class SynthVoiceAllocator {
   public:
     /**
      * @brief Default constructor
      */
-    SynthChannelAllocator() = default;
+    SynthVoiceAllocator() = default;
     
     /**
      * @brief Virtual destructor for proper cleanup of derived classes
      */
-    virtual ~SynthChannelAllocator() = default;
+    virtual ~SynthVoiceAllocator() = default;
     
     /**
      * @brief Deleted copy constructor to prevent copying
      */
-    SynthChannelAllocator(const SynthChannelAllocator&) = delete;
+    SynthVoiceAllocator(const SynthVoiceAllocator&) = delete;
     
     /**
      * @brief Deleted copy assignment operator to prevent copying
      */
-    SynthChannelAllocator& operator=(const SynthChannelAllocator&) = delete;
+    SynthVoiceAllocator& operator=(const SynthVoiceAllocator&) = delete;
     
     /**
      * @brief Default move constructor
      */
-    SynthChannelAllocator(SynthChannelAllocator&&) = default;
+    SynthVoiceAllocator(SynthVoiceAllocator&&) = default;
     
     /**
      * @brief Default move assignment operator
      */
-    SynthChannelAllocator& operator=(SynthChannelAllocator&&) = default;
+    SynthVoiceAllocator& operator=(SynthVoiceAllocator&&) = default;
     
     /**
-     * @brief Allocate a synth channel for a MIDI note
+     * @brief Allocate a synth voice for a MIDI note
      * @param midiNote The MIDI note number (0-127)
-     * @return The allocated synthesizer channel number, or 0xFF if no channels available
+     * @return The allocated synthesizer voice number, or 0xFF if no voices available
      */
-    virtual uint8_t allocateChannel(uint8_t midiNote) = 0;
+    virtual uint8_t allocateVoice(uint8_t midiNote) = 0;
 
     /**
-     * @brief Release a previously allocated synth channel
-     * @param synthChannel The synthesizer channel number to release
+     * @brief Release a previously allocated synth voice
+     * @param synthVoice The synthesizer voice number to release
      */
-    virtual void releaseChannel(uint8_t synthChannel) = 0;
+    virtual void releaseVoice(uint8_t synthVoice) = 0;
 
     /**
-     * @brief Get the synth channel currently assigned to a MIDI note
+     * @brief Get the synth voice currently assigned to a MIDI note
      * @param midiNote The MIDI note number to query (0-127)
-     * @return The synthesizer channel number, or 0xFF if not allocated
+     * @return The synthesizer voice number, or 0xFF if not allocated
      */
-    virtual uint8_t getSynthChannel(uint8_t midiNote) const = 0;
+    virtual uint8_t getSynthVoice(uint8_t midiNote) const = 0;
     
   private:
     // Implementation details would go here
-    // For example, tracking which channels are allocated
+    // For example, tracking which voices are allocated
   };
 
 } // namespace midi
 
-#endif // SYNTH_CHANNEL_ALLOCATOR_H
+#endif // SYNTH_VOICE_ALLOCATOR_H
