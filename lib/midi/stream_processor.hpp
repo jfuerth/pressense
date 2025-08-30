@@ -38,6 +38,11 @@ namespace midi {
                    std::unique_ptr<SynthVoiceAllocator> voiceAllocator,
                    uint8_t listenChannel = 0);
     
+    StreamProcessor(StreamProcessor&& other) = default;
+    StreamProcessor& operator=(StreamProcessor&& other) = default;
+    StreamProcessor(const StreamProcessor&) = delete;
+    StreamProcessor& operator=(const StreamProcessor&) = delete;
+
     /**
      * @brief Destructor for proper cleanup
      */
@@ -72,7 +77,7 @@ namespace midi {
     uint8_t noteNumber = 0;
     uint8_t velocity = 0;
     
-    // Helper methods for MIDI processing
+    // Private helper methods for MIDI processing
     bool isStatusByte(uint8_t data) const;
     uint8_t extractChannel(uint8_t statusByte) const;
     uint8_t extractCommand(uint8_t statusByte) const;

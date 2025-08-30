@@ -1,6 +1,10 @@
 The tests are written with the Unity unit testing framework for C/C++, and are executed under the control of
 PlatformIO's `pio` command.
 
+## Language
+
+This project uses the C++17 standard, as required by the Arduino+ESP-IDF libraries.
+
 ## Organization
 
 Test cases are broken down into three directories:

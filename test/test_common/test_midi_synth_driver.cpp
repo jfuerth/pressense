@@ -2,6 +2,16 @@
 #include <stream_processor.hpp>
 #include <memory>
 
+// Provide std::make_unique for C++11 compatibility
+#if __cplusplus <= 201103L
+namespace std {
+    template <typename T, typename... Args>
+    std::unique_ptr<T> make_unique(Args&&... args) {
+        return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+    }
+}
+#endif
+
 // Mock implementations for testing
 class MockSynth : public midi::Synth {
 public:
@@ -87,91 +97,95 @@ public:
 };
 
 void setUp(void) {
-    // set stuff up here
+    // Unity setUp - currently not used, keeping for potential future use
 }
 
 void tearDown(void) {
-    // clean stuff up here
+    // Unity tearDown - currently not used, keeping for potential future use
+}
+
+// Helper struct to hold test fixtures
+struct TestFixture {
+    std::unique_ptr<MockSynth> mockSynth;
+    std::unique_ptr<MockSynthVoiceAllocator> mockAllocator;
+    MockSynth* synthPtr;
+    MockSynthVoiceAllocator* allocatorPtr;
+    
+    TestFixture() {
+        mockSynth = std::make_unique<MockSynth>();
+        mockAllocator = std::make_unique<MockSynthVoiceAllocator>();
+        synthPtr = mockSynth.get();
+        allocatorPtr = mockAllocator.get();
+    }
+};
+
+// Helper function to create a StreamProcessor with default channel (0)
+midi::StreamProcessor createProcessor(TestFixture& fixture) {
+    return midi::StreamProcessor(std::move(fixture.mockSynth), std::move(fixture.mockAllocator));
+}
+
+// Helper function to create a StreamProcessor with specific channel
+midi::StreamProcessor createProcessorWithChannel(TestFixture& fixture, uint8_t channel) {
+    return midi::StreamProcessor(std::move(fixture.mockSynth), std::move(fixture.mockAllocator), channel);
+}
+
+// Helper function to send a complete Note On message
+void sendNoteOnMessage(midi::StreamProcessor& processor, uint8_t channel, uint8_t note, uint8_t velocity) {
+    uint8_t statusByte = 0x90 | channel; // Note On command + channel
+    processor.process(statusByte);
+    processor.process(note);
+    processor.process(velocity);
 }
 
 void test_noteOn_should_allocateASynthVoice(void) {
     // Arrange
-    auto mockSynth = std::make_unique<MockSynth>();
-    auto mockAllocator = std::make_unique<MockSynthVoiceAllocator>();
+    TestFixture fixture;
+    fixture.allocatorPtr->allocatedVoiceToReturn = 2;
     
-    // Keep raw pointers for verification before moving ownership
-    MockSynth* synthPtr = mockSynth.get();
-    MockSynthVoiceAllocator* allocatorPtr = mockAllocator.get();
-    
-    // Configure the mock to return voice 2 when allocating
-    allocatorPtr->allocatedVoiceToReturn = 2;
-    
-    midi::StreamProcessor processor(std::move(mockSynth), std::move(mockAllocator));
+    midi::StreamProcessor processor = createProcessor(fixture);
     
     // Act - Send a MIDI Note On message: 0x90 (Note On, Channel 0), 0x40 (Middle C), 0x7F (Max velocity)
-    processor.process(0x90); // Note On status byte
-    processor.process(0x40); // Note number (Middle C = 64 decimal = 0x40 hex)
-    processor.process(0x7F); // Velocity (127 decimal = 0x7F hex)
+    sendNoteOnMessage(processor, 0, 0x40, 0x7F);
     
     // Assert - Verify voice allocator was called correctly
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, allocatorPtr->lastAllocatedMidiNote, "Should allocate voice for Middle C");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, allocatorPtr->allocateVoiceCallCount, "allocateVoice should be called exactly once");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, fixture.allocatorPtr->lastAllocatedMidiNote, "Should allocate voice for Middle C");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.allocatorPtr->allocateVoiceCallCount, "allocateVoice should be called exactly once");
     
     // Assert - Verify voice allocator other methods were not called
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, allocatorPtr->releaseVoiceCallCount, "releaseVoice should not be called");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, allocatorPtr->getSynthVoiceCallCount, "getSynthVoice should not be called");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.allocatorPtr->releaseVoiceCallCount, "releaseVoice should not be called");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.allocatorPtr->getSynthVoiceCallCount, "getSynthVoice should not be called");
     
     // Assert - Verify synth methods call counts (exact behavior depends on implementation)
     // Note: These assertions may need adjustment based on actual StreamProcessor implementation
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, synthPtr->releaseCallCount, "release should not be called for Note On");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, synthPtr->setTimbreCallCount, "setTimbre should not be called for basic Note On");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.synthPtr->releaseCallCount, "release should not be called for Note On");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.synthPtr->setTimbreCallCount, "setTimbre should not be called for basic Note On");
 }
 
 void test_noteOn_shouldIgnoreWrongChannel(void) {
     // Arrange
-    auto mockSynth = std::make_unique<MockSynth>();
-    auto mockAllocator = std::make_unique<MockSynthVoiceAllocator>();
+    TestFixture fixture;
+    midi::StreamProcessor processor = createProcessorWithChannel(fixture, 1); // Listen to channel 1
     
-    // Keep raw pointers for verification before moving ownership
-    MockSynth* synthPtr = mockSynth.get();
-    MockSynthVoiceAllocator* allocatorPtr = mockAllocator.get();
-    
-    // Configure StreamProcessor to listen only to channel 1
-    uint8_t listenChannel = 1;
-    midi::StreamProcessor processor(std::move(mockSynth), std::move(mockAllocator), listenChannel);
-    
-    // Act - Send a MIDI Note On message on channel 0: 0x90 (Note On, Channel 0), 0x40 (Middle C), 0x7F (Max velocity)
-    processor.process(0x90); // Note On status byte for channel 0
-    processor.process(0x40); // Note number (Middle C)
-    processor.process(0x7F); // Velocity
+    // Act - Send a MIDI Note On message on channel 0
+    sendNoteOnMessage(processor, 0, 0x40, 0x7F);
     
     // Assert - Should ignore the message since it's on the wrong channel
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, allocatorPtr->allocateVoiceCallCount, "allocateVoice should not be called for wrong channel");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, allocatorPtr->releaseVoiceCallCount, "releaseVoice should not be called");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, allocatorPtr->getSynthVoiceCallCount, "getSynthVoice should not be called");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.allocatorPtr->allocateVoiceCallCount, "allocateVoice should not be called for wrong channel");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.allocatorPtr->releaseVoiceCallCount, "releaseVoice should not be called");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.allocatorPtr->getSynthVoiceCallCount, "getSynthVoice should not be called");
 }
 
 void test_noteOn_shouldRespondToCorrectChannel(void) {
     // Arrange
-    auto mockSynth = std::make_unique<MockSynth>();
-    auto mockAllocator = std::make_unique<MockSynthVoiceAllocator>();
+    TestFixture fixture;
+    midi::StreamProcessor processor = createProcessorWithChannel(fixture, 1); // Listen to channel 1
     
-    // Keep raw pointers for verification before moving ownership
-    MockSynth* synthPtr = mockSynth.get();
-    MockSynthVoiceAllocator* allocatorPtr = mockAllocator.get();
-    
-    // Configure StreamProcessor to listen only to channel 1
-    uint8_t listenChannel = 1;
-    midi::StreamProcessor processor(std::move(mockSynth), std::move(mockAllocator), listenChannel);
-    
-    // Act - Send a MIDI Note On message on channel 1: 0x91 (Note On, Channel 1), 0x40 (Middle C), 0x7F (Max velocity)
-    processor.process(0x91); // Note On status byte for channel 1
-    processor.process(0x40); // Note number (Middle C)
-    processor.process(0x7F); // Velocity
+    // Act - Send a MIDI Note On message on channel 1
+    sendNoteOnMessage(processor, 1, 0x40, 0x7F);
     
     // Assert - Should respond to the message since it's on the correct channel
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, allocatorPtr->lastAllocatedMidiNote, "Should allocate voice for Middle C on correct channel");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, allocatorPtr->allocateVoiceCallCount, "allocateVoice should be called exactly once");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, fixture.allocatorPtr->lastAllocatedMidiNote, "Should allocate voice for Middle C on correct channel");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.allocatorPtr->allocateVoiceCallCount, "allocateVoice should be called exactly once");
 }
 
 // TODO test running status (should not reset the status byte when more non-status bytes are received)
