@@ -1,5 +1,6 @@
 #include "stream_processor.hpp"
 #include <utility>
+#include <cmath>
 
 namespace midi {
 
@@ -11,6 +12,16 @@ StreamProcessor::StreamProcessor(std::unique_ptr<Synth> synth,
     , listenChannel(listenChannel)
 {
     // Constructor implementation - dependencies are moved and stored
+}
+
+StreamProcessor::ProcessorState StreamProcessor::stateFromCommandByte(uint8_t command) {
+    if (command <= 0xBF) { // Commands with 2 data bytes
+        return Need2Bytes;
+    } else if (command <= 0xDF) { // Commands with 1 data byte
+        return Need1Byte;
+    } else { // System messages or unsupported commands
+        return Initial; // For now, treat as Initial (no data bytes expected)
+    }
 }
 
 void StreamProcessor::process(const uint8_t data)
@@ -34,66 +45,72 @@ void StreamProcessor::process(const uint8_t data)
     // FxH 11110sss    0 to 2 System Common
     // FxH 11111ttt         0 System Real Time
 
+    // Status byte always resets the state machine, so we handle it without regard
+    // to the current state.
     if (isStatusByte(data)) {
-        handleStatusByte(data);
+        uint8_t channel = extractChannel(data);
+        uint8_t command = extractCommand(data);
+        
+        // Only process messages on our listen channel
+        if (channel != listenChannel) {
+            currentCommand = 0;
+            processorState = Initial;
+            return;
+        }
+        
+        currentCommand = command;
+        processorState = stateFromCommandByte(command);
+
+    } else if (processorState == Need2Bytes) {
+        messageByte1 = data;
+        processorState = Need1Byte;
+
+    } else if (processorState == Need1Byte) {
+        if (currentCommand == (NOTE_ON_COMMAND)) {
+            uint8_t note = messageByte1;
+            uint8_t velocity = data;
+            if (velocity == 0) {
+                // Note On with velocity 0 is treated as Note Off
+                uint8_t voice = synthVoiceAllocator->getSynthVoice(note);
+                synthVoiceAllocator->releaseVoice(voice); // TODO decide how to coordinate note release with voice allocator (maybe just FIFO?)
+                synth->release(); // TODO this should be one of the voices from the allocator
+            } else {
+                int voice = synthVoiceAllocator->allocateVoice(note); // TODO this should return a voice
+                if (voice >= 0) {
+                    float frequencyHz = 440.0f * std::pow(2.0f, (note - 69) / 12.0f);
+                    float volume = static_cast<float>(velocity) / 127.0f;
+                    synth->trigger(frequencyHz, volume);
+                }
+            }
+
+        } else if (currentCommand == (NOTE_OFF_COMMAND)) {
+            uint8_t note = messageByte1;
+            // data is release velocity (ignored)
+            uint8_t voice = synthVoiceAllocator->getSynthVoice(note);
+            synthVoiceAllocator->releaseVoice(voice); // TODO decide how to coordinate note release with voice allocator (maybe just FIFO?)
+            synth->release(); // TODO this should be one of the voices from the allocator
+        }
+
+        processorState = stateFromCommandByte(currentCommand);
+
     } else {
-        handleDataByte(data);
+        processorState = stateFromCommandByte(currentCommand);
     }
 }
 
-bool StreamProcessor::isStatusByte(uint8_t data) const
+bool StreamProcessor::isStatusByte(uint8_t data)
 {
     return (data & STATUS_BYTE_MASK) != 0;
 }
 
-uint8_t StreamProcessor::extractChannel(uint8_t statusByte) const
+uint8_t StreamProcessor::extractChannel(uint8_t statusByte)
 {
     return statusByte & CHANNEL_MASK;
 }
 
-uint8_t StreamProcessor::extractCommand(uint8_t statusByte) const
+uint8_t StreamProcessor::extractCommand(uint8_t statusByte)
 {
     return statusByte & COMMAND_MASK;
-}
-
-void StreamProcessor::handleStatusByte(uint8_t data)
-{
-    uint8_t channel = extractChannel(data);
-    uint8_t command = extractCommand(data);
-    
-    // Only process messages on our listen channel
-    if (channel != listenChannel) {
-        currentCommand = 0; // Clear current command for wrong channel
-        return;
-    }
-    
-    currentCommand = command;
-    if (command == (NOTE_ON_COMMAND)) {
-        // Note On message - reset state for new message
-        noteOnState = WaitingForNote;
-    } else if (command == (NOTE_OFF_COMMAND)) {
-        // Note Off message
-    }
-}
-
-void StreamProcessor::handleDataByte(uint8_t data)
-{
-    if (currentCommand == (NOTE_ON_COMMAND)) {
-        handleNoteOnDataByte(data);
-    }
-}
-
-void StreamProcessor::handleNoteOnDataByte(uint8_t data)
-{
-    if (noteOnState == WaitingForNote) {
-        noteNumber = data;
-        noteOnState = WaitingForVelocity;
-    } else if (noteOnState == WaitingForVelocity) {
-        velocity = data;
-        // Complete Note On message received - allocate voice
-        synthVoiceAllocator->allocateVoice(noteNumber);
-        noteOnState = WaitingForNote; // Reset for next message
-    }
 }
 
 } // namespace midi

@@ -188,7 +188,86 @@ void test_noteOn_shouldRespondToCorrectChannel(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.allocatorPtr->allocateVoiceCallCount, "allocateVoice should be called exactly once");
 }
 
-// TODO test running status (should not reset the status byte when more non-status bytes are received)
+void test_runningStatus_shouldSendMultipleNotesWithoutRepeatingStatusByte(void) {
+    // Arrange
+    TestFixture fixture;
+    midi::StreamProcessor processor = createProcessor(fixture);
+    
+    // Act - Send a complete Note On message, then two more notes using running status
+    // First message: 0x90 (Note On, Channel 0), 0x40 (Middle C), 0x7F (Max velocity)
+    processor.process(0x90);
+    processor.process(0x40);
+    processor.process(0x7F);
+    
+    // Running status: just data bytes for the next two notes
+    // Second note: 0x41 (C#), 0x7F (Max velocity) - no status byte
+    processor.process(0x41);
+    processor.process(0x7F);
+    
+    // Third note: 0x42 (D), 0x7F (Max velocity) - no status byte  
+    processor.process(0x42);
+    processor.process(0x7F);
+    
+    // Assert - All three notes should be allocated
+    TEST_ASSERT_EQUAL_INT_MESSAGE(3, fixture.allocatorPtr->allocateVoiceCallCount, "Should allocate voices for all three notes");
+}
+
+void test_runningStatus_shouldBeInterruptedByNewStatusByte(void) {
+    // Arrange
+    TestFixture fixture;
+    midi::StreamProcessor processor = createProcessor(fixture);
+    
+    // Act - Send a Note On, then interrupt with a new status byte before completion
+    processor.process(0x90); // Note On status
+    processor.process(0x40); // Note number (Middle C)
+    // Before sending velocity, interrupt with a new status byte
+    processor.process(0x80); // Note Off status - should clear running status
+    processor.process(0x41); // Note number for Note Off
+    processor.process(0x7F); // Velocity for Note Off
+    
+    // Now send data bytes that should NOT be interpreted as Note On
+    processor.process(0x42); // This should not be interpreted as another note
+    processor.process(0x7F);
+    
+    // Assert - Only the Note Off should have processed (no note allocation for incomplete Note On)
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.allocatorPtr->allocateVoiceCallCount, "Incomplete Note On should not allocate voice");
+    // Note: We're not testing Note Off allocation yet since it's not implemented
+}
+
+void test_noteOff_shouldReleaseAllocatedVoice(void) {
+    // Arrange
+    TestFixture fixture;
+    midi::StreamProcessor processor = createProcessor(fixture);
+    
+    // First allocate a voice with Note On
+    sendNoteOnMessage(processor, 0, 0x40, 0x7F);
+    
+    // Act - Send a MIDI Note Off message: 0x80 (Note Off, Channel 0), 0x40 (Middle C), 0x7F (velocity)
+    processor.process(0x80); // Note Off status
+    processor.process(0x40); // Note number (Middle C)
+    processor.process(0x7F); // Release velocity
+    
+    // Assert - Voice should be released
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.allocatorPtr->releaseVoiceCallCount, "releaseVoice should be called exactly once");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, fixture.allocatorPtr->lastQueriedMidiNote, "Should query the correct MIDI note");
+}
+
+void test_noteOnZeroVelocity_shouldReleaseAllocatedVoice(void) {
+    // Arrange
+    TestFixture fixture;
+    midi::StreamProcessor processor = createProcessor(fixture);
+    
+    // First allocate a voice with Note On
+    sendNoteOnMessage(processor, 0, 0x40, 0x7F);
+
+    // Act - Send a MIDI Note On message for the same channel and note, 0 velocity
+    sendNoteOnMessage(processor, 0, 0x40, 0x00);
+    
+    // Assert - Voice should be released
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.allocatorPtr->releaseVoiceCallCount, "releaseVoice should be called exactly once");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, fixture.allocatorPtr->lastQueriedMidiNote, "Should query the correct MIDI note");
+}
+
 // TODO test status byte interrupting a partial message (should throw away the partial message)
 // TODO test system real-time messages interrupting a partial message (should resume the partial message)
 // TODO test system common bytes
@@ -202,6 +281,10 @@ void RUN_UNITY_TESTS() {
     RUN_TEST(test_noteOn_should_allocateASynthVoice);
     RUN_TEST(test_noteOn_shouldIgnoreWrongChannel);
     RUN_TEST(test_noteOn_shouldRespondToCorrectChannel);
+    RUN_TEST(test_runningStatus_shouldSendMultipleNotesWithoutRepeatingStatusByte);
+    RUN_TEST(test_runningStatus_shouldBeInterruptedByNewStatusByte);
+    RUN_TEST(test_noteOff_shouldReleaseAllocatedVoice);
+    RUN_TEST(test_noteOnZeroVelocity_shouldReleaseAllocatedVoice);
     UNITY_END();
 }
 
