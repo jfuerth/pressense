@@ -44,9 +44,15 @@ void StreamProcessor::process(const uint8_t data)
     // FxH 11110sss    0 to 2 System Common
     // FxH 11111ttt         0 System Real Time
 
-    // Status byte always resets the state machine, so we handle it without regard
-    // to the current state.
-    if (isStatusByte(data)) {
+    // Decision tree for state transitions
+    // The first few checks are for data bytes that are independent of current MIDI parser state
+    if (isSystemRealTime(data)) {
+        // These messages can appear anywhere in the stream and do not affect running status
+        // For now, we just ignore them and preserve the current state
+        return;
+
+    } else if (isStatusByte(data)) {
+        // Non-realtime status bytes reset the running status and discard any partial message
         uint8_t channel = extractChannel(data);
         uint8_t command = extractCommand(data);
         
@@ -97,6 +103,11 @@ void StreamProcessor::process(const uint8_t data)
 bool StreamProcessor::isStatusByte(uint8_t data)
 {
     return (data & STATUS_BYTE_MASK) != 0;
+}
+
+bool StreamProcessor::isSystemRealTime(uint8_t data)
+{
+    return data >= SYSTEM_REALTIME_MIN && data <= SYSTEM_REALTIME_MAX;
 }
 
 uint8_t StreamProcessor::extractChannel(uint8_t statusByte)

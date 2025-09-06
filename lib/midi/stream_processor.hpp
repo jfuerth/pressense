@@ -13,11 +13,8 @@ namespace midi {
   static constexpr uint8_t COMMAND_MASK = 0xF0;
   static constexpr uint8_t NOTE_ON_COMMAND = 0x90;
   static constexpr uint8_t NOTE_OFF_COMMAND = 0x80;
-
-  struct MidiStatusByte {
-    uint8_t command : 4; // MIDI command (e.g., Note On, Note Off)
-    uint8_t channel : 4; // MIDI channel (0-15)
-  };
+  static constexpr uint8_t SYSTEM_REALTIME_MIN = 0xF8;
+  static constexpr uint8_t SYSTEM_REALTIME_MAX = 0xFF;
 
   /**
    * @brief Concrete class for processing MIDI data streams
@@ -54,7 +51,7 @@ namespace midi {
     void process(const uint8_t data);
     
   private:
-  
+
     /**
      * @brief Voice allocator for managing synthesizer voices
      */
@@ -74,6 +71,7 @@ namespace midi {
 
     // Private helper methods for MIDI processing
     static bool isStatusByte(uint8_t data);
+    static bool isSystemRealTime(uint8_t data);
     static ProcessorState stateFromCommandByte(uint8_t command);
     static uint8_t extractChannel(uint8_t statusByte);
     static uint8_t extractCommand(uint8_t statusByte);

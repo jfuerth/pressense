@@ -295,7 +295,32 @@ void test_statusByteInterruption_shouldDiscardPartialMessage(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, voice->releaseCallCount, "Voice should not be released by incomplete Note On");
 }
 
-// TODO test system real-time messages interrupting a partial message (should resume the partial message)
+void test_systemRealTime_shouldNotInterruptPartialMessage(void) {
+    // Arrange
+    TestFixture fixture(0); // Channel 0
+    
+    // Start a Note On message
+    fixture.getProcessor().process(0x90); // Note On status
+    fixture.getProcessor().process(0x40); // Note number (E4)
+    
+    // System Real-Time messages (0xF8-0xFF) should NOT interrupt the partial message
+    fixture.getProcessor().process(0xF8); // MIDI Clock (system real-time)
+    fixture.getProcessor().process(0xFA); // MIDI Start (system real-time)
+    fixture.getProcessor().process(0xFC); // MIDI Stop (system real-time)
+    
+    // Complete the Note On message - this should still work
+    fixture.getProcessor().process(0x7F); // Velocity
+    
+    // Assert - The Note On should complete successfully despite real-time interruptions
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.allocator->voiceForCallCount, "Note On should complete despite real-time interruptions");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, fixture.allocator->lastQueriedMidiNote, "Should trigger the correct note");
+    
+    // Verify the voice was actually triggered
+    MockSynth* voice = fixture.allocator->getLastAllocatedVoice();
+    TEST_ASSERT_NOT_NULL_MESSAGE(voice, "Should have allocated a voice");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, voice->triggerCallCount, "Voice should be triggered");
+}
+
 // TODO test system common bytes
 // TODO test system real-time bytes
 // TODO test system exclusive messages
@@ -316,6 +341,7 @@ void RUN_UNITY_TESTS() {
     RUN_TEST(test_noteOff_shouldReleaseAllocatedVoice);
     RUN_TEST(test_noteOnZeroVelocity_shouldReleaseAllocatedVoice);
     RUN_TEST(test_statusByteInterruption_shouldDiscardPartialMessage);
+    RUN_TEST(test_systemRealTime_shouldNotInterruptPartialMessage);
     UNITY_END();
 }
 
