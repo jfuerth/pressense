@@ -1,6 +1,7 @@
 #ifndef SYNTH_VOICE_ALLOCATOR_H
 #define SYNTH_VOICE_ALLOCATOR_H
 
+#include "synth.hpp"
 #include <cstdint>
 
 namespace midi {
@@ -10,14 +11,17 @@ namespace midi {
    * 
    * This class provides the interface for mapping between MIDI notes and available
    * synthesizer voices, ensuring efficient voice allocation for polyphonic synthesis.
+   * This class owns the synthesizer instances it manages.
    */
   class SynthVoiceAllocator {
   public:
     /**
      * @brief Default constructor
      */
-    SynthVoiceAllocator() = default;
-    
+    SynthVoiceAllocator(uint8_t maxVoices) : maxVoices(maxVoices) {
+        // Initialize voice allocation data structures
+    }
+
     virtual ~SynthVoiceAllocator() = default;
     SynthVoiceAllocator(const SynthVoiceAllocator&) = delete;
     SynthVoiceAllocator& operator=(const SynthVoiceAllocator&) = delete;
@@ -25,28 +29,17 @@ namespace midi {
     SynthVoiceAllocator& operator=(SynthVoiceAllocator&&) = default;
     
     /**
-     * @brief Allocate a synth voice for a MIDI note
+     * @brief Retrieve the current voice assigned to the note, or allocate a new one
      * @param midiNote The MIDI note number (0-127)
-     * @return The allocated synthesizer voice number, or 0xFF if no voices available
+     * @return The voice for the note.
+     * 
+     * If there are not enough voices available, a previously allocated voice will be reassigned.
+     * This method should never fail and always return a valid voice.
      */
-    virtual uint8_t allocateVoice(uint8_t midiNote) = 0;
-
-    /**
-     * @brief Release a previously allocated synth voice
-     * @param synthVoice The synthesizer voice number to release
-     */
-    virtual void releaseVoice(uint8_t synthVoice) = 0;
-
-    /**
-     * @brief Get the synth voice currently assigned to a MIDI note
-     * @param midiNote The MIDI note number to query (0-127)
-     * @return The synthesizer voice number, or 0xFF if not allocated
-     */
-    virtual uint8_t getSynthVoice(uint8_t midiNote) const = 0;
+    virtual Synth& voiceFor(uint8_t midiNote) = 0;
     
   private:
-    // Implementation details would go here
-    // For example, tracking which voices are allocated
+    uint8_t maxVoices;
   };
 
 } // namespace midi

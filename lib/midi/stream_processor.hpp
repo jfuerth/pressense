@@ -30,13 +30,12 @@ namespace midi {
   public:
     /**
      * @brief Construct a StreamProcessor with custom synth and voice allocator
-     * @param synth Unique pointer to the synthesizer implementation
      * @param voiceAllocator Unique pointer to the voice allocator implementation
      * @param listenChannel MIDI channel to listen to (0-15)
      */
-    StreamProcessor(std::unique_ptr<Synth> synth, 
-                   std::unique_ptr<SynthVoiceAllocator> voiceAllocator,
-                   uint8_t listenChannel = 0);
+    StreamProcessor(
+      std::unique_ptr<SynthVoiceAllocator> voiceAllocator,
+      uint8_t listenChannel = 0);
 
     StreamProcessor(StreamProcessor&& other) = default;
     StreamProcessor& operator=(StreamProcessor&& other) = default;
@@ -55,11 +54,7 @@ namespace midi {
     void process(const uint8_t data);
     
   private:
-    /**
-     * @brief Synthesizer implementation for audio generation
-     */
-    std::unique_ptr<Synth> synth;
-    
+  
     /**
      * @brief Voice allocator for managing synthesizer voices
      */

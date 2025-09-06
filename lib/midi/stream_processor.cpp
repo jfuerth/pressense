@@ -4,11 +4,10 @@
 
 namespace midi {
 
-StreamProcessor::StreamProcessor(std::unique_ptr<Synth> synth, 
-                               std::unique_ptr<SynthVoiceAllocator> voiceAllocator,
-                               uint8_t listenChannel)
-    : synth(std::move(synth))
-    , synthVoiceAllocator(std::move(voiceAllocator))
+StreamProcessor::StreamProcessor(
+        std::unique_ptr<SynthVoiceAllocator> voiceAllocator,
+        uint8_t listenChannel)
+    : synthVoiceAllocator(std::move(voiceAllocator))
     , listenChannel(listenChannel)
 {
     // Constructor implementation - dependencies are moved and stored
@@ -69,26 +68,23 @@ void StreamProcessor::process(const uint8_t data)
         if (currentCommand == (NOTE_ON_COMMAND)) {
             uint8_t note = messageByte1;
             uint8_t velocity = data;
+
+            Synth& voice = synthVoiceAllocator->voiceFor(note);
+
             if (velocity == 0) {
                 // Note On with velocity 0 is treated as Note Off
-                uint8_t voice = synthVoiceAllocator->getSynthVoice(note);
-                synthVoiceAllocator->releaseVoice(voice); // TODO decide how to coordinate note release with voice allocator (maybe just FIFO?)
-                synth->release(); // TODO this should be one of the voices from the allocator
+                voice.release();
             } else {
-                int voice = synthVoiceAllocator->allocateVoice(note); // TODO this should return a voice
-                if (voice >= 0) {
-                    float frequencyHz = 440.0f * std::pow(2.0f, (note - 69) / 12.0f);
-                    float volume = static_cast<float>(velocity) / 127.0f;
-                    synth->trigger(frequencyHz, volume);
-                }
+                float frequencyHz = 440.0f * std::pow(2.0f, (note - 69) / 12.0f);
+                float volume = static_cast<float>(velocity) / 127.0f;
+                voice.trigger(frequencyHz, volume);
             }
 
         } else if (currentCommand == (NOTE_OFF_COMMAND)) {
             uint8_t note = messageByte1;
             // data is release velocity (ignored)
-            uint8_t voice = synthVoiceAllocator->getSynthVoice(note);
-            synthVoiceAllocator->releaseVoice(voice); // TODO decide how to coordinate note release with voice allocator (maybe just FIFO?)
-            synth->release(); // TODO this should be one of the voices from the allocator
+            Synth& voice = synthVoiceAllocator->voiceFor(note);
+            voice.release();
         }
 
         processorState = stateFromCommandByte(currentCommand);
