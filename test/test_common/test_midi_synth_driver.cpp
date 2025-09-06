@@ -268,12 +268,42 @@ void test_noteOnZeroVelocity_shouldReleaseAllocatedVoice(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(1, voice->releaseCallCount, "release should be called exactly once");
 }
 
-// TODO test status byte interrupting a partial message (should throw away the partial message)
+void test_statusByteInterruption_shouldDiscardPartialMessage(void) {
+    // Arrange
+    TestFixture fixture(0); // Channel 0
+    
+    // Start a Note On but don't complete it
+    fixture.getProcessor().process(0x90); // Note On status
+    fixture.getProcessor().process(0x40); // Note number (E4)
+    // Missing velocity - message incomplete
+    
+    // Send a Program Change message (which interrupts and has only 1 data byte)
+    fixture.getProcessor().process(0xC0); // Program Change status 
+    fixture.getProcessor().process(0x05); // Program number
+    
+    // Now send what would be running status data for Program Change
+    fixture.getProcessor().process(0x41); // Should be interpreted as another Program Change
+    
+    // Assert - The incomplete Note On should never trigger a voice
+    // Program Change messages should not call voiceFor
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.allocator->voiceForCallCount, "Incomplete Note On and Program Change should not call voiceFor");
+    
+    // Verify the voice for note 0x40 was never triggered or released
+    MockSynth* voice = fixture.allocator->getVoice(0x40);
+    TEST_ASSERT_NOT_NULL_MESSAGE(voice, "Voice should exist");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, voice->triggerCallCount, "Voice should not be triggered by incomplete Note On");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, voice->releaseCallCount, "Voice should not be released by incomplete Note On");
+}
+
 // TODO test system real-time messages interrupting a partial message (should resume the partial message)
 // TODO test system common bytes
 // TODO test system real-time bytes
 // TODO test system exclusive messages
-// TODO test channel voice messages
+// TODO test polyphonic aftertouch messages (setTimbre 0f..1f)
+// TODO test control change (volume for now, log others)
+// TODO test program change (log program number)
+// TODO test channel aftertouch
+// TODO test pitch bend messages
 // TODO test channel mode messages
 
 void RUN_UNITY_TESTS() {
@@ -285,6 +315,7 @@ void RUN_UNITY_TESTS() {
     RUN_TEST(test_runningStatus_shouldBeInterruptedByNewStatusByte);
     RUN_TEST(test_noteOff_shouldReleaseAllocatedVoice);
     RUN_TEST(test_noteOnZeroVelocity_shouldReleaseAllocatedVoice);
+    RUN_TEST(test_statusByteInterruption_shouldDiscardPartialMessage);
     UNITY_END();
 }
 
