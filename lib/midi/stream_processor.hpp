@@ -13,6 +13,7 @@ namespace midi {
   static constexpr uint8_t COMMAND_MASK = 0xF0;
   static constexpr uint8_t NOTE_ON_COMMAND = 0x90;
   static constexpr uint8_t NOTE_OFF_COMMAND = 0x80;
+  static constexpr uint8_t PITCH_BEND_COMMAND = 0xE0;
   static constexpr uint8_t SYSTEM_REALTIME_MIN = 0xF8;
   static constexpr uint8_t SYSTEM_REALTIME_MAX = 0xFF;
 

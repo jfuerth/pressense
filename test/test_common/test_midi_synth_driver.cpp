@@ -1,6 +1,7 @@
 #include <unity.h>
 #include <stream_processor.hpp>
 #include <synth.hpp>
+#include <simple_voice_allocator.hpp>
 #include <memory>
 #include <vector>
 
@@ -47,12 +48,29 @@ public:
         return activeState;
     }
     
+    void setPitchBend(float bendAmount) override {
+        lastPitchBend = bendAmount;
+        setPitchBendCallCount++;
+    }
+    
+    float getPitchBendRange() const override {
+        getPitchBendRangeCallCount++;
+        return pitchBendRange;
+    }
+    
+    void setPitchBendRange(float semitones) override {
+        pitchBendRange = semitones;
+        setPitchBendRangeCallCount++;
+    }
+    
     // Test verification helpers
     float lastTriggerFrequency = 0.0f;
     float lastTriggerVolume = 0.0f;
     float lastSetFrequency = 0.0f;
     float lastSetTimbre = 0.0f;
     float lastSetVolume = 0.0f;
+    float lastPitchBend = 0.0f;
+    float pitchBendRange = 2.0f; // Default 2 semitones
     bool activeState = false;
     
     // Call counters
@@ -61,15 +79,25 @@ public:
     int setFrequencyCallCount = 0;
     int setTimbreCallCount = 0;
     int setVolumeCallCount = 0;
+    int setPitchBendCallCount = 0;
+    mutable int getPitchBendRangeCallCount = 0;
+    int setPitchBendRangeCallCount = 0;
     mutable int isActiveCallCount = 0;
 };
 
 class MockSynthVoiceAllocator : public midi::SynthVoiceAllocator {
 public:
-    MockSynthVoiceAllocator() : midi::SynthVoiceAllocator(8) {
-        // We're not testing the allocator here; just have a voice per note
+    using VoiceFactory = std::function<std::unique_ptr<MockSynth>()>;
+    
+    MockSynthVoiceAllocator(VoiceFactory factory = nullptr) : midi::SynthVoiceAllocator(128) {
+        // Default factory creates standard MockSynth instances
+        if (!factory) {
+            factory = []() { return std::make_unique<MockSynth>(); };
+        }
+        
+        // We're not testing the allocator here; just have a voice per note for easy testing
         for (int i = 0; i < 128; i++) {
-            voices.push_back(std::make_unique<MockSynth>());
+            voices.push_back(factory());
         }
     }
 
@@ -93,6 +121,13 @@ public:
     MockSynth* getLastAllocatedVoice() {
         return getVoice(lastAllocatedVoiceIndex);
     }
+    
+    void forEachVoice(std::function<void(midi::Synth&)> func) override {
+        forEachVoiceCallCount++;
+        for (auto& voice : voices) {
+            func(*voice);
+        }
+    }
         
     // Test verification helpers
     mutable uint8_t lastQueriedMidiNote = 0;
@@ -100,6 +135,7 @@ public:
     
     // Call counters
     mutable int voiceForCallCount = 0;
+    mutable int forEachVoiceCallCount = 0;
 
 private:
     std::vector<std::unique_ptr<MockSynth>> voices;
@@ -118,8 +154,8 @@ struct TestFixture {
     MockSynthVoiceAllocator* allocator; // non-owning pointer; tied to processor lifetime
     std::unique_ptr<midi::StreamProcessor> processor;
     
-    explicit TestFixture(uint8_t channel = 0) {
-        auto allocatorPtr = std::make_unique<MockSynthVoiceAllocator>();
+    explicit TestFixture(uint8_t channel = 0, MockSynthVoiceAllocator::VoiceFactory voiceFactory = nullptr) {
+        auto allocatorPtr = std::make_unique<MockSynthVoiceAllocator>(voiceFactory);
         allocator = allocatorPtr.get(); // Keep raw pointer for test access
         processor = std::make_unique<midi::StreamProcessor>(std::move(allocatorPtr), channel);
     }
@@ -135,6 +171,16 @@ void sendNoteOnMessage(midi::StreamProcessor& processor, uint8_t channel, uint8_
     processor.process(statusByte);
     processor.process(note);
     processor.process(velocity);
+}
+
+// Helper function to send a complete Pitch Bend message
+void sendPitchBendMessage(midi::StreamProcessor& processor, uint8_t channel, uint16_t bendValue) {
+    uint8_t statusByte = 0xE0 | channel; // Pitch Bend command + channel
+    uint8_t lsb = bendValue & 0x7F;       // Lower 7 bits
+    uint8_t msb = (bendValue >> 7) & 0x7F; // Upper 7 bits
+    processor.process(statusByte);
+    processor.process(lsb);
+    processor.process(msb);
 }
 
 void test_noteOn_should_allocateASynthVoice(void) {
@@ -321,6 +367,67 @@ void test_systemRealTime_shouldNotInterruptPartialMessage(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(1, voice->triggerCallCount, "Voice should be triggered");
 }
 
+void test_pitchBend_shouldApplyToAllVoices(void) {
+    // Arrange
+    TestFixture fixture(0); // Channel 0
+    
+    // Allocate some voices with notes
+    sendNoteOnMessage(fixture.getProcessor(), 0, 0x40, 0x7F); // E4
+    sendNoteOnMessage(fixture.getProcessor(), 0, 0x44, 0x7F); // G#4
+    
+    // Reset the call count before sending pitch bend
+    fixture.allocator->forEachVoiceCallCount = 0;
+    
+    // Act - Send pitch bend message: center (8192) + 2048 = 10240 (about +25% bend)
+    sendPitchBendMessage(fixture.getProcessor(), 0, 10240);
+    
+    // Assert - forEachVoice should be called to apply pitch bend to all voices
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.allocator->forEachVoiceCallCount, "forEachVoice should be called once");
+    
+    // Assert - Both allocated voices should have pitch bend applied
+    MockSynth* voice1 = fixture.allocator->getVoice(0x40); // E4 voice
+    MockSynth* voice2 = fixture.allocator->getVoice(0x44); // G#4 voice
+    
+    TEST_ASSERT_NOT_NULL_MESSAGE(voice1, "E4 voice should exist");
+    TEST_ASSERT_NOT_NULL_MESSAGE(voice2, "G#4 voice should exist");
+    
+    // Pitch bend value should be normalized: (10240 - 8192) / 8192 ≈ 0.25
+    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.01f, 0.25f, voice1->lastPitchBend, "E4 voice should have correct pitch bend");
+    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.01f, 0.25f, voice2->lastPitchBend, "G#4 voice should have correct pitch bend");
+    
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, voice1->setPitchBendCallCount, "E4 voice setPitchBend should be called once");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, voice2->setPitchBendCallCount, "G#4 voice setPitchBend should be called once");
+}
+
+void test_pitchBend_shouldRespectCustomPitchBendRange(void) {
+    // Arrange - Create voices with custom 12 semitone pitch bend range
+    auto customVoiceFactory = []() {
+        auto voice = std::make_unique<MockSynth>();
+        voice->setPitchBendRange(12.0f); // Full octave range
+        return voice;
+    };
+    
+    TestFixture fixture(0, customVoiceFactory); // Channel 0, custom voice factory
+    
+    // Allocate a voice with a note
+    sendNoteOnMessage(fixture.getProcessor(), 0, 0x40, 0x7F); // E4
+    
+    // Reset the call count before sending pitch bend
+    fixture.allocator->forEachVoiceCallCount = 0;
+    
+    // Act - Send pitch bend message: center (8192) + 2048 = 10240 (about +25% bend)
+    sendPitchBendMessage(fixture.getProcessor(), 0, 10240);
+    
+    // Assert - Voice should have the custom pitch bend range
+    MockSynth* voice = fixture.allocator->getVoice(0x40); // E4 voice
+    TEST_ASSERT_NOT_NULL_MESSAGE(voice, "E4 voice should exist");
+    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.01f, 12.0f, voice->pitchBendRange, "Voice should have custom 12 semitone pitch bend range");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, voice->setPitchBendRangeCallCount, "setPitchBendRange should have been called during voice creation");
+    
+    // Pitch bend value should still be normalized: (10240 - 8192) / 8192 ≈ 0.25
+    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.01f, 0.25f, voice->lastPitchBend, "Voice should have correct normalized pitch bend");
+}
+
 // TODO test system common bytes
 // TODO test system real-time bytes
 // TODO test system exclusive messages
@@ -342,6 +449,8 @@ void RUN_UNITY_TESTS() {
     RUN_TEST(test_noteOnZeroVelocity_shouldReleaseAllocatedVoice);
     RUN_TEST(test_statusByteInterruption_shouldDiscardPartialMessage);
     RUN_TEST(test_systemRealTime_shouldNotInterruptPartialMessage);
+    RUN_TEST(test_pitchBend_shouldApplyToAllVoices);
+    RUN_TEST(test_pitchBend_shouldRespectCustomPitchBendRange);
     UNITY_END();
 }
 

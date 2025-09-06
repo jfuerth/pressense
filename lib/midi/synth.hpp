@@ -62,6 +62,28 @@ namespace midi {
     virtual void setVolume(float volume) = 0;
 
     /**
+     * @brief Apply pitch bend to the synthesizer
+     * @param bendAmount The pitch bend amount (-1.0 to +1.0, where 0.0 is center)
+     * 
+     * The actual frequency change depends on the pitchBendRange property.
+     * For example, with default 2 semitone range:
+     * -1.0 = -2 semitones, 0.0 = no change, +1.0 = +2 semitones
+     */
+    virtual void setPitchBend(float bendAmount) = 0;
+
+    /**
+     * @brief Get the current pitch bend range in semitones
+     * @return The pitch bend range (default is 2.0 semitones)
+     */
+    virtual float getPitchBendRange() const = 0;
+
+    /**
+     * @brief Set the pitch bend range in semitones
+     * @param semitones The range for full pitch bend (typically 2.0, but can be 12.0 or more)
+     */
+    virtual void setPitchBendRange(float semitones) = 0;
+
+    /**
      * @brief Check if the synth is currently active (i.e., playing a note)
      * 
      * Channel allocators can use this to determine if a synth is available

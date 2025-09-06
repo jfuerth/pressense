@@ -3,6 +3,7 @@
 
 #include "synth.hpp"
 #include <cstdint>
+#include <functional>
 
 namespace midi {
 
@@ -37,6 +38,15 @@ namespace midi {
      * This method should never fail and always return a valid voice.
      */
     virtual Synth& voiceFor(uint8_t midiNote) = 0;
+    
+    /**
+     * @brief Apply a function to each voice managed by this allocator
+     * @param func Function to apply to each voice
+     * 
+     * This allows operations like pitch bend to be applied to all voices
+     * without exposing the internal voice management structure.
+     */
+    virtual void forEachVoice(std::function<void(Synth&)> func) = 0;
     
   private:
     uint8_t maxVoices;

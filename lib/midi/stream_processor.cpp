@@ -14,9 +14,9 @@ StreamProcessor::StreamProcessor(
 }
 
 StreamProcessor::ProcessorState StreamProcessor::stateFromCommandByte(uint8_t command) {
-    if (command <= 0xBF) { // Commands with 2 data bytes
+    if (command <= 0xBF || (command & COMMAND_MASK) == 0xE0) {
         return Need2Bytes;
-    } else if (command <= 0xDF) { // Commands with 1 data byte
+    } else if (command <= 0xDF) {
         return Need1Byte;
     } else { // System messages or unsupported commands
         return Initial; // For now, treat as Initial (no data bytes expected)
@@ -91,6 +91,22 @@ void StreamProcessor::process(const uint8_t data)
             // data is release velocity (ignored)
             Synth& voice = synthVoiceAllocator->voiceFor(note);
             voice.release();
+
+        } else if (currentCommand == (PITCH_BEND_COMMAND)) {
+            uint8_t lsb = messageByte1;
+            uint8_t msb = data;
+            
+            // Combine LSB and MSB into 14-bit value
+            uint16_t pitchBendValue = (msb << 7) | lsb;
+            
+            // Convert 14-bit value (0-16383) to normalized float (-1.0 to +1.0)
+            // Center value is 8192, so subtract center and divide by range
+            float normalizedBend = (static_cast<float>(pitchBendValue) - 8192.0f) / 8192.0f;
+            
+            // Apply pitch bend to all voices via forEachVoice
+            synthVoiceAllocator->forEachVoice([normalizedBend](Synth& voice) {
+                voice.setPitchBend(normalizedBend);
+            });
         }
 
         processorState = stateFromCommandByte(currentCommand);
