@@ -18,29 +18,10 @@ namespace midi {
      */
     SynthVoiceAllocator() = default;
     
-    /**
-     * @brief Virtual destructor for proper cleanup of derived classes
-     */
     virtual ~SynthVoiceAllocator() = default;
-    
-    /**
-     * @brief Deleted copy constructor to prevent copying
-     */
     SynthVoiceAllocator(const SynthVoiceAllocator&) = delete;
-    
-    /**
-     * @brief Deleted copy assignment operator to prevent copying
-     */
     SynthVoiceAllocator& operator=(const SynthVoiceAllocator&) = delete;
-    
-    /**
-     * @brief Default move constructor
-     */
     SynthVoiceAllocator(SynthVoiceAllocator&&) = default;
-    
-    /**
-     * @brief Default move assignment operator
-     */
     SynthVoiceAllocator& operator=(SynthVoiceAllocator&&) = default;
     
     /**
