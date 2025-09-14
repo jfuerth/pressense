@@ -23,6 +23,10 @@ namespace midi {
    * This class processes MIDI byte streams and routes them to a synthesizer
    * using a pluggable channel allocator for voice management. Both the
    * synthesizer and channel allocator can be customized via dependency injection.
+   * 
+   * TODO: Add voiceFor() variant that returns a voice if and only if it's currently 
+   * allocated to that note. This would prevent stealing voices back when we receive 
+   * note-off events for voices that were already stolen and reassigned to different notes.
    */
   class StreamProcessor {
   public:

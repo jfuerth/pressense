@@ -39,6 +39,11 @@ namespace midi {
      */
     virtual Synth& voiceFor(uint8_t midiNote) = 0;
     
+    // TODO: Add method like existingVoiceFor(uint8_t midiNote) -> Synth* 
+    // that returns a voice if and only if it's currently allocated to that note.
+    // This would prevent note-off events from stealing back voices that were 
+    // already reassigned to different notes.
+    
     /**
      * @brief Apply a function to each voice managed by this allocator
      * @param func Function to apply to each voice
