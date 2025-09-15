@@ -116,8 +116,8 @@ void test_voiceFor_sameNoteTwice_shouldReturnSameInstance(void) {
     // Assert - Should return the same instance
     TEST_ASSERT_EQUAL_PTR_MESSAGE(&voice1, &voice2, "voiceFor() should return the same instance for the same MIDI note");
     
-    // Verify only one TestSynth instance was created
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, TestSynth::instanceCounter, "Should only create one TestSynth instance for the same note");
+    // Verify all voices are pre-cached (optimization for real-time use)
+    TEST_ASSERT_EQUAL_INT_MESSAGE(8, TestSynth::instanceCounter, "All 8 TestSynth instances should be pre-cached");
     
     // Cast to TestSynth to verify the instance ID
     TestSynth* testVoice1 = static_cast<TestSynth*>(&voice1);
@@ -139,9 +139,6 @@ void test_voiceFor_differentNotes_shouldReturnDifferentInstances(void) {
     TEST_ASSERT_TRUE_MESSAGE(&voice1 != &voice2, "Different MIDI notes should return different voice instances");
     TEST_ASSERT_TRUE_MESSAGE(&voice1 != &voice3, "Different MIDI notes should return different voice instances");
     TEST_ASSERT_TRUE_MESSAGE(&voice2 != &voice3, "Different MIDI notes should return different voice instances");
-    
-    // Verify three TestSynth instances were created
-    TEST_ASSERT_EQUAL_INT_MESSAGE(3, TestSynth::instanceCounter, "Should create three TestSynth instances for three different notes");
     
     // Cast to TestSynth to verify different instance IDs
     TestSynth* testVoice1 = static_cast<TestSynth*>(&voice1);
@@ -208,9 +205,7 @@ void test_voiceFor_stolenVoice_shouldBeInactiveState(void) {
     TEST_ASSERT_TRUE_MESSAGE(voice3.isActive(), "Stolen voice should work normally after being reassigned");
 }
 
-// TODO implementation should pre-cache voices up to maxVoices to avoid dynamic allocation during real-time operation
 // TODO implementation should prefer to reuse inactive voices before reallocating active ones
-// TODO implementation should avoid using std::unordered_map for note-to-voice mapping to reduce dynamic memory usage and fragmentation
 
 void RUN_UNITY_TESTS() {
     UNITY_BEGIN();

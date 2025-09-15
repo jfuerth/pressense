@@ -6,7 +6,6 @@
 #include <memory>
 #include <vector>
 #include <functional>
-#include <unordered_map>
 
 namespace midi {
 
@@ -16,8 +15,30 @@ namespace midi {
    * This allocator creates voices on-demand using a provided factory function,
    * allowing for flexible configuration of voice types and parameters.
    * Uses a simple allocation strategy suitable for testing and basic use cases.
+   * 
+   * Contract: 
+   * - Outside the constructor and destructor, no dynamic memory allocation happens. This is to
+   *   ensure smooth real-time audio processing.
    */
   class SimpleVoiceAllocator : public SynthVoiceAllocator {
+  private:
+    /**
+     * @brief Internal structure to track voice allocation state
+     */
+    struct AllocatedVoice {
+        std::unique_ptr<Synth> synth;
+        uint8_t assignedNote = 0;        // MIDI note this voice is assigned to
+        bool isAllocated = false;        // Whether this voice is currently assigned to a note
+        
+        AllocatedVoice(std::unique_ptr<Synth> voice) : synth(std::move(voice)) {}
+        
+        // Move-only semantics
+        AllocatedVoice(const AllocatedVoice&) = delete;
+        AllocatedVoice& operator=(const AllocatedVoice&) = delete;
+        AllocatedVoice(AllocatedVoice&&) = default;
+        AllocatedVoice& operator=(AllocatedVoice&&) = default;
+    };
+    
   public:
     using VoiceFactory = std::function<std::unique_ptr<Synth>()>;
     
@@ -30,6 +51,11 @@ namespace midi {
         : SynthVoiceAllocator(maxVoices)
         , voiceFactory(factory) {
         voices.reserve(maxVoices);
+        
+        // Pre-cache all voices to avoid dynamic allocation during real-time operation
+        for (uint8_t i = 0; i < maxVoices; ++i) {
+            voices.emplace_back(voiceFactory());
+        }
     }
     
     // Rule of 5: Follow base class design (move-only)
@@ -40,7 +66,7 @@ namespace midi {
     SimpleVoiceAllocator& operator=(SimpleVoiceAllocator&&) = default;
     
     /**
-     * @brief Get a new or existing synthesizer voice for the specified MIDI note
+     * @brief Get a synthesizer voice for the specified MIDI note
      * @param midiNote MIDI note number (0-127)
      * @return Reference to the assigned voice
      * 
@@ -51,50 +77,47 @@ namespace midi {
      * - The returned voice is ready for trigger() to be called
      */
     Synth& voiceFor(uint8_t midiNote) override {
-        // Check if we already have a voice for this MIDI note
-        auto existingVoice = noteToVoiceMap.find(midiNote);
-        if (existingVoice != noteToVoiceMap.end()) {
-            return *voices[existingVoice->second];
-        }
-        
-        // Need to allocate a new voice
-        size_t voiceIndex;
-        if (voices.size() < voices.capacity()) {
-            // Create a new voice
-            voices.push_back(voiceFactory());
-            voiceIndex = voices.size() - 1;
-        } else {
-            // Reuse an existing voice (round-robin)
-            voiceIndex = (lastAllocatedIndex + 1) % voices.capacity();
-            lastAllocatedIndex = voiceIndex;
-            
-            // Remove the old mapping for this voice and release it
-            for (auto it = noteToVoiceMap.begin(); it != noteToVoiceMap.end(); ++it) {
-                if (it->second == voiceIndex) {
-                    noteToVoiceMap.erase(it);
-                    break;
-                }
+        // Check if we already have a voice allocated for this MIDI note
+        for (auto& voice : voices) {
+            if (voice.isAllocated && voice.assignedNote == midiNote) {
+                return *voice.synth;
             }
-            
-            // Release the voice to clean up its state before reassignment
-            voices[voiceIndex]->release();
         }
         
-        // Map this MIDI note to the voice
-        noteToVoiceMap[midiNote] = voiceIndex;
-        return *voices[voiceIndex];
+        // Find an unallocated voice first
+        for (auto& voice : voices) {
+            if (!voice.isAllocated) {
+                voice.assignedNote = midiNote;
+                voice.isAllocated = true;
+                return *voice.synth;
+            }
+        }
+        
+        // All voices are allocated. Reuse one (round-robin).
+        size_t voiceIndex = (lastAllocatedIndex + 1) % voices.size();
+        lastAllocatedIndex = voiceIndex;
+        
+        AllocatedVoice& voice = voices[voiceIndex];
+        
+        // Release the voice to clean up its state before reassignment
+        voice.synth->release();
+        
+        // Reassign to new note
+        voice.assignedNote = midiNote;
+        voice.isAllocated = true;
+        
+        return *voice.synth;
     }
     
     void forEachVoice(std::function<void(Synth&)> func) override {
         for (auto& voice : voices) {
-            func(*voice);
+            func(*voice.synth);
         }
     }
     
   private:
     VoiceFactory voiceFactory;
-    std::vector<std::unique_ptr<Synth>> voices;
-    std::unordered_map<uint8_t, size_t> noteToVoiceMap; // MIDI note -> voice index
+    std::vector<AllocatedVoice> voices;
     size_t lastAllocatedIndex = 0;
   };
 

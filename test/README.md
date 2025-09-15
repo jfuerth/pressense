@@ -3,7 +3,7 @@ PlatformIO's `pio` command.
 
 ## Language
 
-This project uses the C++17 standard, as required by the Arduino+ESP-IDF libraries.
+This project uses the C++17 standard, as (I think) is required by the Arduino+ESP-IDF libraries.
 
 ## Organization
 
@@ -30,6 +30,9 @@ To run the common + esp32 tests (requires an ESP 32 connected via USB/serial):
 source ~/.platformio/penv/bin/activate
 pio test -e esp32dev
 ```
+
+Especially When running the native tests, just run the whole suite. It only takes a second or two
+and it's faster than running one group of tests at a time.
 
 ## Referencing library code from tests
 
