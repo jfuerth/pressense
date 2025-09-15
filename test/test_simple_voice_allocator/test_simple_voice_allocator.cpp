@@ -3,6 +3,10 @@
 #include <synth.hpp>
 #include <memory>
 
+// Enable memory tracking for this test suite
+#define ENABLE_MEMORY_TRACKING
+#include "memory_tracker.hpp"
+
 // Provide std::make_unique for C++11 compatibility
 #if __cplusplus <= 201103L
 namespace std {
@@ -205,6 +209,98 @@ void test_voiceFor_stolenVoice_shouldBeInactiveState(void) {
     TEST_ASSERT_TRUE_MESSAGE(voice3.isActive(), "Stolen voice should work normally after being reassigned");
 }
 
+void test_voiceFor_shouldNotAllocateMemoryAfterConstruction(void) {
+    // Arrange - Create allocator (this can allocate memory)
+    auto voiceFactory = []() { return std::make_unique<TestSynth>(); };
+    midi::SimpleVoiceAllocator allocator(4, voiceFactory);
+    
+    // Act & Assert - Track memory during voice operations
+    {
+        ScopedMemoryTracker tracker;
+        
+        // These operations should not allocate any memory
+        midi::Synth& voice1 = allocator.voiceFor(60); // Middle C
+        midi::Synth& voice2 = allocator.voiceFor(64); // E4
+        midi::Synth& voice3 = allocator.voiceFor(67); // G4
+        midi::Synth& voice4 = allocator.voiceFor(72); // C5
+        
+        // Trigger voices (should not allocate)
+        voice1.trigger(261.63f, 0.8f);
+        voice2.trigger(329.63f, 0.7f);
+        voice3.trigger(392.0f, 0.6f);
+        voice4.trigger(523.25f, 0.9f);
+        
+        // Test voice reuse when exceeding maxVoices (should not allocate)
+        midi::Synth& voice5 = allocator.voiceFor(76); // E5 - will steal a voice
+        voice5.trigger(659.25f, 0.5f);
+        
+        // Same note requests (should not allocate)
+        midi::Synth& voice1Again = allocator.voiceFor(60);
+        midi::Synth& voice5Again = allocator.voiceFor(76);
+        
+        // Release voices (should not allocate)
+        voice1.release();
+        voice2.release();
+        voice3.release();
+        voice4.release();
+        voice5.release();
+        
+        // Apply operations to all voices (should not allocate)
+        allocator.forEachVoice([](midi::Synth& voice) {
+            voice.setPitchBend(0.5f);
+            voice.setVolume(0.7f);
+        });
+        
+        // Assert - No memory allocations should have occurred
+        TEST_ASSERT_EQUAL_INT_MESSAGE(0, tracker.getAllocationCount(), 
+            "Voice operations should not allocate memory after construction");
+        TEST_ASSERT_EQUAL_INT_MESSAGE(0, tracker.getDeallocationCount(), 
+            "Voice operations should not deallocate memory during runtime");
+    }
+}
+
+void test_voiceOperations_usingMacro_shouldNotAllocateMemory(void) {
+    // Arrange - Create allocator (this can allocate memory)
+    auto voiceFactory = []() { return std::make_unique<TestSynth>(); };
+    midi::SimpleVoiceAllocator allocator(3, voiceFactory);
+    
+    // Act & Assert - Use macro to verify no allocations
+    TEST_NO_HEAP_ALLOCATIONS({
+        // Basic voice allocation and operations
+        midi::Synth& voice1 = allocator.voiceFor(60);
+        midi::Synth& voice2 = allocator.voiceFor(64);
+        midi::Synth& voice3 = allocator.voiceFor(67);
+        
+        // Voice operations
+        voice1.trigger(261.63f, 0.8f);
+        voice2.trigger(329.63f, 0.7f);
+        voice3.trigger(392.0f, 0.6f);
+        
+        // Voice state queries
+        bool active1 = voice1.isActive();
+        bool active2 = voice2.isActive();
+        bool active3 = voice3.isActive();
+        
+        // Voice reuse (should steal and release)
+        midi::Synth& voice4 = allocator.voiceFor(72); // Should reuse voice1
+        
+        // Batch operations
+        allocator.forEachVoice([](midi::Synth& voice) {
+            voice.setPitchBend(0.25f);
+        });
+        
+        // Repeated voice access
+        midi::Synth& voice1Again = allocator.voiceFor(60);
+        midi::Synth& voice4Again = allocator.voiceFor(72);
+        
+        // Release operations
+        voice1Again.release();
+        voice2.release();
+        voice3.release();
+        voice4Again.release();
+    });
+}
+
 // TODO implementation should prefer to reuse inactive voices before reallocating active ones
 
 void RUN_UNITY_TESTS() {
@@ -213,6 +309,8 @@ void RUN_UNITY_TESTS() {
     RUN_TEST(test_voiceFor_differentNotes_shouldReturnDifferentInstances);
     RUN_TEST(test_voiceFor_exceedMaxVoices_shouldReuseVoices);
     RUN_TEST(test_voiceFor_stolenVoice_shouldBeInactiveState);
+    RUN_TEST(test_voiceFor_shouldNotAllocateMemoryAfterConstruction);
+    RUN_TEST(test_voiceOperations_usingMacro_shouldNotAllocateMemory);
     UNITY_END();
 }
 
