@@ -75,7 +75,7 @@ void StreamProcessor::process(const uint8_t data)
             uint8_t note = messageByte1;
             uint8_t velocity = data;
 
-            Synth& voice = synthVoiceAllocator->voiceFor(note);
+            Synth& voice = synthVoiceAllocator->allocate(note);
 
             if (velocity == 0) {
                 // Note On with velocity 0 is treated as Note Off
@@ -89,7 +89,7 @@ void StreamProcessor::process(const uint8_t data)
         } else if (currentCommand == (NOTE_OFF_COMMAND)) {
             uint8_t note = messageByte1;
             // data is release velocity (ignored)
-            Synth& voice = synthVoiceAllocator->voiceFor(note);
+            Synth& voice = synthVoiceAllocator->allocate(note);
             voice.release();
 
         } else if (currentCommand == (PITCH_BEND_COMMAND)) {

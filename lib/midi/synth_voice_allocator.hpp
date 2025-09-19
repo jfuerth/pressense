@@ -37,12 +37,20 @@ namespace midi {
      * If there are not enough voices available, a previously allocated voice will be reassigned.
      * This method should never fail and always return a valid voice.
      */
-    virtual Synth& voiceFor(uint8_t midiNote) = 0;
+    virtual Synth& allocate(uint8_t midiNote) = 0;
     
-    // TODO: Add method like existingVoiceFor(uint8_t midiNote) -> Synth* 
-    // that returns a voice if and only if it's currently allocated to that note.
-    // This would prevent note-off events from stealing back voices that were 
-    // already reassigned to different notes.
+    /**
+     * @brief Get the voice currently assigned to a specific MIDI note, if any
+     * @param midiNote The MIDI note number (0-127) 
+     * @return Pointer to the voice if currently assigned to this note, nullptr otherwise
+     * 
+     * This method only returns a voice if it's currently allocated to the specified note.
+     * Does not allocate a new voice or steal an existing voice from another note.
+     * This is essential for updating existing voices with pitch bends, aftertouch, and
+     * even note-off events to avoid stealing voices that were already reassigned to
+     * different notes.
+     */
+    virtual Synth* findAllocated(uint8_t midiNote) = 0;
     
     /**
      * @brief Apply a function to each voice managed by this allocator

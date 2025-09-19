@@ -76,7 +76,7 @@ namespace midi {
      * - Reused voices are automatically released (inactive state) before reassignment
      * - The returned voice is ready for trigger() to be called
      */
-    Synth& voiceFor(uint8_t midiNote) override {
+    Synth& allocate(uint8_t midiNote) override {
         // Check if we already have a voice allocated for this MIDI note
         for (auto& voice : voices) {
             if (voice.isAllocated && voice.assignedNote == midiNote) {
@@ -107,6 +107,18 @@ namespace midi {
         voice.isAllocated = true;
         
         return *voice.synth;
+    }
+    
+    Synth* findAllocated(uint8_t midiNote) override {
+        // Check if we have a voice currently allocated for this MIDI note
+        for (auto& voice : voices) {
+            if (voice.isAllocated && voice.assignedNote == midiNote) {
+                return voice.synth.get();
+            }
+        }
+        
+        // No voice is currently allocated to this note
+        return nullptr;
     }
     
     void forEachVoice(std::function<void(Synth&)> func) override {

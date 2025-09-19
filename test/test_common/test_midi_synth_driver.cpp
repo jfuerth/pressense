@@ -101,13 +101,21 @@ public:
         }
     }
 
-    midi::Synth& voiceFor(uint8_t midiNote) override {
+    midi::Synth& allocate(uint8_t midiNote) override {
         lastQueriedMidiNote = midiNote;
         voiceForCallCount++;
         
         // Simple voice allocation: each note has a dedicated voice for testing
         lastAllocatedVoiceIndex = midiNote;
         return *voices[midiNote];
+    }
+    
+    midi::Synth* findAllocated(uint8_t midiNote) override {
+        // For testing, just return the voice if it exists (simple 1:1 mapping)
+        if (midiNote < voices.size()) {
+            return voices[midiNote].get();
+        }
+        return nullptr;
     }
     
     // Test access helpers

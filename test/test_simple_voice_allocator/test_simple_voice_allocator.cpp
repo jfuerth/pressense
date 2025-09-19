@@ -114,8 +114,8 @@ void test_voiceFor_sameNoteTwice_shouldReturnSameInstance(void) {
     midi::SimpleVoiceAllocator allocator(8, voiceFactory);
     
     // Act - Request voice for the same MIDI note twice
-    midi::Synth& voice1 = allocator.voiceFor(60); // Middle C
-    midi::Synth& voice2 = allocator.voiceFor(60); // Middle C again
+    midi::Synth& voice1 = allocator.allocate(60); // Middle C
+    midi::Synth& voice2 = allocator.allocate(60); // Middle C again
     
     // Assert - Should return the same instance
     TEST_ASSERT_EQUAL_PTR_MESSAGE(&voice1, &voice2, "voiceFor() should return the same instance for the same MIDI note");
@@ -135,9 +135,9 @@ void test_voiceFor_differentNotes_shouldReturnDifferentInstances(void) {
     midi::SimpleVoiceAllocator allocator(8, voiceFactory);
     
     // Act - Request voices for different MIDI notes
-    midi::Synth& voice1 = allocator.voiceFor(60); // Middle C
-    midi::Synth& voice2 = allocator.voiceFor(64); // E4
-    midi::Synth& voice3 = allocator.voiceFor(67); // G4
+    midi::Synth& voice1 = allocator.allocate(60); // Middle C
+    midi::Synth& voice2 = allocator.allocate(64); // E4
+    midi::Synth& voice3 = allocator.allocate(67); // G4
     
     // Assert - Should return different instances
     TEST_ASSERT_TRUE_MESSAGE(&voice1 != &voice2, "Different MIDI notes should return different voice instances");
@@ -160,9 +160,9 @@ void test_voiceFor_exceedMaxVoices_shouldReuseVoices(void) {
     midi::SimpleVoiceAllocator allocator(2, voiceFactory); // Only 2 voices available
     
     // Act - Request voices for 3 different MIDI notes (exceeding maxVoices)
-    midi::Synth& voice1 = allocator.voiceFor(60); // Middle C
-    midi::Synth& voice2 = allocator.voiceFor(64); // E4
-    midi::Synth& voice3 = allocator.voiceFor(67); // G4 - should reuse one of the existing voices
+    midi::Synth& voice1 = allocator.allocate(60); // Middle C
+    midi::Synth& voice2 = allocator.allocate(64); // E4
+    midi::Synth& voice3 = allocator.allocate(67); // G4 - should reuse one of the existing voices
     
     // Assert - Should have created exactly 2 voice instances (not 3)
     TEST_ASSERT_EQUAL_INT_MESSAGE(2, TestSynth::instanceCounter, "Should only create 2 TestSynth instances when maxVoices is 2");
@@ -175,7 +175,7 @@ void test_voiceFor_exceedMaxVoices_shouldReuseVoices(void) {
     TEST_ASSERT_TRUE_MESSAGE(&voice1 != &voice2, "First two voices should still be different instances");
     
     // Act - Request the reused note again, should return the same instance
-    midi::Synth& voice3Again = allocator.voiceFor(67); // G4 again
+    midi::Synth& voice3Again = allocator.allocate(67); // G4 again
     TEST_ASSERT_EQUAL_PTR_MESSAGE(&voice3, &voice3Again, "Requesting the same note should return the same reused voice");
 }
 
@@ -185,8 +185,8 @@ void test_voiceFor_stolenVoice_shouldBeInactiveState(void) {
     midi::SimpleVoiceAllocator allocator(2, voiceFactory); // Only 2 voices available
     
     // Act - Trigger two voices and activate them
-    midi::Synth& voice1 = allocator.voiceFor(60); // Middle C
-    midi::Synth& voice2 = allocator.voiceFor(64); // E4
+    midi::Synth& voice1 = allocator.allocate(60); // Middle C
+    midi::Synth& voice2 = allocator.allocate(64); // E4
     voice1.trigger(261.63f, 0.8f); // Make voice1 active
     voice2.trigger(329.63f, 0.7f); // Make voice2 active
     
@@ -195,7 +195,7 @@ void test_voiceFor_stolenVoice_shouldBeInactiveState(void) {
     TEST_ASSERT_TRUE_MESSAGE(voice2.isActive(), "Voice2 should be active after trigger");
     
     // Act - Request a third voice, which should steal one of the existing voices
-    midi::Synth& voice3 = allocator.voiceFor(67); // G4 - will steal a voice
+    midi::Synth& voice3 = allocator.allocate(67); // G4 - will steal a voice
     
     // Assert - The stolen voice should be inactive (not in triggered state)
     TEST_ASSERT_FALSE_MESSAGE(voice3.isActive(), "Stolen voice should be inactive when reassigned to new note");
@@ -219,10 +219,10 @@ void test_voiceFor_shouldNotAllocateMemoryAfterConstruction(void) {
         ScopedMemoryTracker tracker;
         
         // These operations should not allocate any memory
-        midi::Synth& voice1 = allocator.voiceFor(60); // Middle C
-        midi::Synth& voice2 = allocator.voiceFor(64); // E4
-        midi::Synth& voice3 = allocator.voiceFor(67); // G4
-        midi::Synth& voice4 = allocator.voiceFor(72); // C5
+        midi::Synth& voice1 = allocator.allocate(60); // Middle C
+        midi::Synth& voice2 = allocator.allocate(64); // E4
+        midi::Synth& voice3 = allocator.allocate(67); // G4
+        midi::Synth& voice4 = allocator.allocate(72); // C5
         
         // Trigger voices (should not allocate)
         voice1.trigger(261.63f, 0.8f);
@@ -231,12 +231,12 @@ void test_voiceFor_shouldNotAllocateMemoryAfterConstruction(void) {
         voice4.trigger(523.25f, 0.9f);
         
         // Test voice reuse when exceeding maxVoices (should not allocate)
-        midi::Synth& voice5 = allocator.voiceFor(76); // E5 - will steal a voice
+        midi::Synth& voice5 = allocator.allocate(76); // E5 - will steal a voice
         voice5.trigger(659.25f, 0.5f);
         
         // Same note requests (should not allocate)
-        midi::Synth& voice1Again = allocator.voiceFor(60);
-        midi::Synth& voice5Again = allocator.voiceFor(76);
+        midi::Synth& voice1Again = allocator.allocate(60);
+        midi::Synth& voice5Again = allocator.allocate(76);
         
         // Release voices (should not allocate)
         voice1.release();
@@ -267,9 +267,9 @@ void test_voiceOperations_usingMacro_shouldNotAllocateMemory(void) {
     // Act & Assert - Use macro to verify no allocations
     TEST_NO_HEAP_ALLOCATIONS({
         // Basic voice allocation and operations
-        midi::Synth& voice1 = allocator.voiceFor(60);
-        midi::Synth& voice2 = allocator.voiceFor(64);
-        midi::Synth& voice3 = allocator.voiceFor(67);
+        midi::Synth& voice1 = allocator.allocate(60);
+        midi::Synth& voice2 = allocator.allocate(64);
+        midi::Synth& voice3 = allocator.allocate(67);
         
         // Voice operations
         voice1.trigger(261.63f, 0.8f);
@@ -282,7 +282,7 @@ void test_voiceOperations_usingMacro_shouldNotAllocateMemory(void) {
         bool active3 = voice3.isActive();
         
         // Voice reuse (should steal and release)
-        midi::Synth& voice4 = allocator.voiceFor(72); // Should reuse voice1
+        midi::Synth& voice4 = allocator.allocate(72); // Should reuse voice1
         
         // Batch operations
         allocator.forEachVoice([](midi::Synth& voice) {
@@ -290,8 +290,15 @@ void test_voiceOperations_usingMacro_shouldNotAllocateMemory(void) {
         });
         
         // Repeated voice access
-        midi::Synth& voice1Again = allocator.voiceFor(60);
-        midi::Synth& voice4Again = allocator.voiceFor(72);
+        midi::Synth& voice1Again = allocator.allocate(60);
+        midi::Synth& voice4Again = allocator.allocate(72);
+        
+        // Test existingVoiceFor operations (should not allocate)
+        midi::Synth* existing1 = allocator.findAllocated(60);
+        midi::Synth* existing2 = allocator.findAllocated(64);
+        midi::Synth* existing3 = allocator.findAllocated(67);
+        midi::Synth* existing4 = allocator.findAllocated(72);
+        midi::Synth* nonExisting = allocator.findAllocated(80); // Should be nullptr
         
         // Release operations
         voice1Again.release();
@@ -299,6 +306,68 @@ void test_voiceOperations_usingMacro_shouldNotAllocateMemory(void) {
         voice3.release();
         voice4Again.release();
     });
+}
+
+void test_existingVoiceFor_shouldReturnNullptrForUnallocatedNote(void) {
+    // Arrange
+    auto voiceFactory = []() { return std::make_unique<TestSynth>(); };
+    midi::SimpleVoiceAllocator allocator(4, voiceFactory);
+    
+    // Act & Assert - Should return nullptr for notes that haven't been allocated
+    TEST_ASSERT_NULL_MESSAGE(allocator.findAllocated(60), "Should return nullptr for unallocated note");
+    TEST_ASSERT_NULL_MESSAGE(allocator.findAllocated(64), "Should return nullptr for unallocated note");
+    TEST_ASSERT_NULL_MESSAGE(allocator.findAllocated(67), "Should return nullptr for unallocated note");
+}
+
+void test_existingVoiceFor_shouldReturnVoiceForAllocatedNote(void) {
+    // Arrange
+    auto voiceFactory = []() { return std::make_unique<TestSynth>(); };
+    midi::SimpleVoiceAllocator allocator(4, voiceFactory);
+    
+    // Act - Allocate some voices
+    midi::Synth& voice1 = allocator.allocate(60); // Middle C
+    midi::Synth& voice2 = allocator.allocate(64); // E4
+    
+    // Assert - existingVoiceFor should return the same voices
+    midi::Synth* existingVoice1 = allocator.findAllocated(60);
+    midi::Synth* existingVoice2 = allocator.findAllocated(64);
+    
+    TEST_ASSERT_NOT_NULL_MESSAGE(existingVoice1, "Should return voice for allocated note");
+    TEST_ASSERT_NOT_NULL_MESSAGE(existingVoice2, "Should return voice for allocated note");
+    TEST_ASSERT_EQUAL_PTR_MESSAGE(&voice1, existingVoice1, "Should return the same voice instance");
+    TEST_ASSERT_EQUAL_PTR_MESSAGE(&voice2, existingVoice2, "Should return the same voice instance");
+    
+    // Assert - Still return nullptr for unallocated notes
+    TEST_ASSERT_NULL_MESSAGE(allocator.findAllocated(67), "Should return nullptr for unallocated note");
+}
+
+void test_existingVoiceFor_shouldReturnNullptrAfterVoiceStolen(void) {
+    // Arrange
+    auto voiceFactory = []() { return std::make_unique<TestSynth>(); };
+    midi::SimpleVoiceAllocator allocator(2, voiceFactory); // Only 2 voices
+    
+    // Act - Allocate 2 voices
+    midi::Synth& voice1 = allocator.allocate(60); // Middle C
+    midi::Synth& voice2 = allocator.allocate(64); // E4
+    
+    // Verify both voices are available via existingVoiceFor
+    TEST_ASSERT_NOT_NULL_MESSAGE(allocator.findAllocated(60), "Voice 1 should be allocated");
+    TEST_ASSERT_NOT_NULL_MESSAGE(allocator.findAllocated(64), "Voice 2 should be allocated");
+    
+    // Act - Request a third voice, which should steal voice2 (round-robin from index 1)
+    midi::Synth& voice3 = allocator.allocate(67); // G4 - will steal voice2
+    
+    // Assert - The voice1 (note 60) should still be available
+    TEST_ASSERT_NOT_NULL_MESSAGE(allocator.findAllocated(60), "Voice1 should still be available");
+    
+    // Assert - The stolen note (64) should no longer have a voice
+    TEST_ASSERT_NULL_MESSAGE(allocator.findAllocated(64), "Stolen note should return nullptr");
+    
+    // Assert - The new note should have a voice
+    TEST_ASSERT_NOT_NULL_MESSAGE(allocator.findAllocated(67), "New note should have voice");
+    
+    // Assert - The new voice should be the same instance as the stolen one (voice2)
+    TEST_ASSERT_EQUAL_PTR_MESSAGE(&voice2, &voice3, "New voice should be same instance as stolen voice");
 }
 
 // TODO implementation should prefer to reuse inactive voices before reallocating active ones
@@ -311,6 +380,9 @@ void RUN_UNITY_TESTS() {
     RUN_TEST(test_voiceFor_stolenVoice_shouldBeInactiveState);
     RUN_TEST(test_voiceFor_shouldNotAllocateMemoryAfterConstruction);
     RUN_TEST(test_voiceOperations_usingMacro_shouldNotAllocateMemory);
+    RUN_TEST(test_existingVoiceFor_shouldReturnNullptrForUnallocatedNote);
+    RUN_TEST(test_existingVoiceFor_shouldReturnVoiceForAllocatedNote);
+    RUN_TEST(test_existingVoiceFor_shouldReturnNullptrAfterVoiceStolen);
     UNITY_END();
 }
 
