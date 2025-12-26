@@ -93,20 +93,30 @@ namespace midi {
             }
         }
         
-        // All voices are allocated. Reuse one (round-robin).
-        size_t voiceIndex = (lastAllocatedIndex + 1) % voices.size();
-        lastAllocatedIndex = voiceIndex;
-        
-        AllocatedVoice& voice = voices[voiceIndex];
+        AllocatedVoice* voiceToSteal = nullptr;
+        // Check for an inactive voice (may still be in the release phase, but key is not held)
+        for (auto& voice : voices) {
+            if (!voice.synth->isActive()) {
+                voiceToSteal = &voice;
+                break;
+            }
+        }
+
+        if (voiceToSteal == nullptr) {
+            // No inactive voice found, fall back to round-robin stealing
+            size_t voiceIndex = (lastAllocatedIndex + 1) % voices.size();
+            lastAllocatedIndex = voiceIndex;
+            voiceToSteal = &voices[voiceIndex];
+        }
         
         // Release the voice to clean up its state before reassignment
-        voice.synth->release();
+        voiceToSteal->synth->release();
         
         // Reassign to new note
-        voice.assignedNote = midiNote;
-        voice.isAllocated = true;
+        voiceToSteal->assignedNote = midiNote;
+        voiceToSteal->isAllocated = true;
         
-        return *voice.synth;
+        return *voiceToSteal->synth;
     }
     
     Synth* findAllocated(uint8_t midiNote) override {
