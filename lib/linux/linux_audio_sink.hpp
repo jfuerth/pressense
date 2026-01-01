@@ -6,12 +6,14 @@
 #include <stdexcept>
 #include <cstring>
 
+namespace linux {
+
 /**
  * @brief ALSA-based audio output for Linux
  */
-class LinuxAudioSink {
+class AlsaPcmOut {
 public:
-    LinuxAudioSink(const char* deviceName = "default", 
+    AlsaPcmOut(const char* deviceName = "default", 
                    unsigned int sampleRate = 44100,
                    unsigned int channels = 2,
                    unsigned int bufferFrames = 512)
@@ -50,7 +52,7 @@ public:
         buffer_.resize(bufferFrames_ * channels_);
     }
     
-    ~LinuxAudioSink() {
+    ~AlsaPcmOut() {
         if (pcmHandle_) {
             snd_pcm_drain(pcmHandle_);
             snd_pcm_close(pcmHandle_);
@@ -58,8 +60,8 @@ public:
     }
     
     // Delete copy constructor and assignment
-    LinuxAudioSink(const LinuxAudioSink&) = delete;
-    LinuxAudioSink& operator=(const LinuxAudioSink&) = delete;
+    AlsaPcmOut(const AlsaPcmOut&) = delete;
+    AlsaPcmOut& operator=(const AlsaPcmOut&) = delete;
     
     /**
      * @brief Fill buffer and write to audio device
@@ -98,5 +100,7 @@ private:
     snd_pcm_uframes_t bufferFrames_;
     std::vector<float> buffer_;
 };
+
+} // namespace linux
 
 #endif // LINUX_AUDIO_SINK_HPP

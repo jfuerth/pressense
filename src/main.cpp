@@ -1,7 +1,7 @@
-#include "sawtooth_synth.hpp"
-#include "linux_audio_sink.hpp"
-#include "../lib/midi/stream_processor.hpp"
-#include "../lib/midi/simple_voice_allocator.hpp"
+#include <sawtooth_synth.hpp>
+#include <linux_audio_sink.hpp>
+#include <stream_processor.hpp>
+#include <simple_voice_allocator.hpp>
 #include <iostream>
 #include <memory>
 #include <csignal>
@@ -21,8 +21,8 @@ extern "C" {
 
 int app_main(void) {
     try {
-        std::cout << "Pressence Sawtooth Synthesizer" << std::endl;
-        std::cout << "==============================" << std::endl;
+        std::cout << "Pressence Synthesizer" << std::endl;
+        std::cout << "=====================" << std::endl;
         
         // Setup signal handler for graceful shutdown
         signal(SIGINT, signalHandler);
@@ -36,14 +36,14 @@ int app_main(void) {
         
         // Create audio sink
         std::cout << "Initializing audio output..." << std::endl;
-        LinuxAudioSink audioSink("default", SAMPLE_RATE, CHANNELS, BUFFER_FRAMES);
+        linux::AlsaPcmOut audioSink("default", SAMPLE_RATE, CHANNELS, BUFFER_FRAMES);
         std::cout << "Audio: " << audioSink.getSampleRate() << " Hz, " 
                   << audioSink.getChannels() << " channels, "
                   << audioSink.getBufferFrames() << " frames/buffer" << std::endl;
         
         // Create voice allocator with sawtooth synth factory
         auto voiceFactory = [SAMPLE_RATE]() -> std::unique_ptr<midi::Synth> {
-            return std::make_unique<SawtoothSynth>(static_cast<float>(SAMPLE_RATE));
+            return std::make_unique<synth::WavetableSynth>(static_cast<float>(SAMPLE_RATE));
         };
         
         auto voiceAllocator = std::make_unique<midi::SimpleVoiceAllocator>(MAX_VOICES, voiceFactory);
@@ -81,9 +81,9 @@ int app_main(void) {
             // Fill and write audio buffer
             audioSink.write([&](float* buffer, unsigned int numFrames) {
                 // Get all voices and mix them
-                std::vector<SawtoothSynth*> activeSynths;
+                std::vector<synth::WavetableSynth*> activeSynths;
                 allocatorPtr->forEachVoice([&](midi::Synth& synth) {
-                    activeSynths.push_back(static_cast<SawtoothSynth*>(&synth));
+                    activeSynths.push_back(static_cast<synth::WavetableSynth*>(&synth));
                 });
                 
                 for (unsigned int frame = 0; frame < numFrames; ++frame) {
