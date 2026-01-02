@@ -40,6 +40,10 @@ public:
         snd_pcm_hw_params_set_format(pcmHandle_, hwParams, SND_PCM_FORMAT_FLOAT_LE);
         snd_pcm_hw_params_set_channels(pcmHandle_, hwParams, channels_);
         snd_pcm_hw_params_set_rate_near(pcmHandle_, hwParams, &sampleRate_, 0);
+        
+        // Set buffer size to 2 periods for low latency
+        snd_pcm_uframes_t bufferSize = bufferFrames_ * 2;
+        snd_pcm_hw_params_set_buffer_size_near(pcmHandle_, hwParams, &bufferSize);
         snd_pcm_hw_params_set_period_size_near(pcmHandle_, hwParams, &bufferFrames_, 0);
         
         // Write parameters to device
