@@ -4,29 +4,43 @@
 #include <synth.hpp>
 #include <wavetable_oscillator.hpp>
 #include <adsr_envelope.hpp>
+#include <biquad_filter.hpp>
 #include <cmath>
 
 namespace synth {
 
 /**
- * @brief Modular wavetable synthesizer with ADSR envelope
+ * @brief Modular wavetable synthesizer with filter and ADSR envelope
  * 
  * Composed of:
  * - WavetableOscillator: Morphable waveform generation
+ * - BiquadFilter: Resonant lowpass filter
  * - AdsrEnvelope: Amplitude envelope
  * - Inline pitch bend processing
+ * 
+ * TODO: Add more filter controls via CC messages (sliders/knobs)
+ *       - Filter Q/resonance
+ *       - Filter mode selection
+ *       - Filter envelope amount
+ *       - Second filter stage for steeper rolloff
  */
 class WavetableSynth : public midi::Synth {
 public:
     WavetableSynth(float sampleRate = 44100.0f) 
         : sampleRate_(sampleRate),
           oscillator_(sampleRate),
-          envelope_(sampleRate) {}
+          filter_(sampleRate),
+          envelope_(sampleRate) {
+        // Initialize filter with default settings
+        filter_.setMode(BiquadFilter::Mode::LOWPASS);
+        filter_.setQ(0.707f);  // Butterworth response
+    }
     
     void trigger(float frequencyHz, float volume) override {
         baseFrequency_ = frequencyHz;
         volume_ = volume;
         oscillator_.reset();
+        filter_.reset();  // Clear filter state for clean attack
         envelope_.trigger();
     }
     
@@ -40,6 +54,16 @@ public:
     
     void setTimbre(float timbre) override {
         timbre_ = timbre;
+        
+        // Map timbre [0, 1] to filter cutoff frequency
+        // Use exponential mapping for more musical response
+        // Range: 100Hz (timbre=0) to 10kHz (timbre=1)
+        const float MIN_CUTOFF = 100.0f;
+        const float MAX_CUTOFF = 10000.0f;
+        float cutoff = MIN_CUTOFF * std::pow(MAX_CUTOFF / MIN_CUTOFF, timbre);
+        filter_.setCutoff(cutoff);
+        
+        // Also morph the waveform (original behavior)
         oscillator_.updateWavetable(timbre);
     }
     
@@ -79,6 +103,9 @@ public:
         // Generate oscillator sample
         float sample = oscillator_.nextSample(frequency);
         
+        // Apply filter (classic subtractive synthesis: osc -> filter -> envelope)
+        sample = filter_.processSample(sample);
+        
         // Apply envelope and volume
         float envelopeLevel = envelope_.nextSample();
         sample *= envelopeLevel * volume_;
@@ -91,6 +118,7 @@ private:
     
     // Components (composed by value for cache locality and inlining)
     WavetableOscillator oscillator_;
+    BiquadFilter filter_;
     AdsrEnvelope envelope_;
     
     // Voice parameters

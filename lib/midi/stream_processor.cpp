@@ -92,6 +92,19 @@ void StreamProcessor::process(const uint8_t data)
             Synth& voice = synthVoiceAllocator->allocate(note);
             voice.release();
 
+        } else if (currentCommand == (CONTROL_CHANGE_COMMAND) && messageByte1 < 120) {
+            uint8_t controllerNumber = messageByte1;
+            uint8_t controllerValue = data;
+
+            synthVoiceAllocator->forEachVoice([controllerNumber, controllerValue](Synth& voice) {
+                // Special: Handle Modulation Wheel (controller 1)
+                if (controllerNumber == 1) {
+                    float timbre = static_cast<float>(controllerValue) / 127.0f;
+                    voice.setTimbre(timbre);
+                }
+                // TODO: general handling for other controllers as needed
+            });
+
         } else if (currentCommand == (PITCH_BEND_COMMAND)) {
             uint8_t lsb = messageByte1;
             uint8_t msb = data;
@@ -104,6 +117,7 @@ void StreamProcessor::process(const uint8_t data)
             float normalizedBend = (static_cast<float>(pitchBendValue) - 8192.0f) / 8192.0f;
             
             // Apply pitch bend to all voices via forEachVoice
+            // This ensures even voices not currently assigned to notes get updated
             synthVoiceAllocator->forEachVoice([normalizedBend](Synth& voice) {
                 voice.setPitchBend(normalizedBend);
             });
