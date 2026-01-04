@@ -43,6 +43,9 @@ public:
         if (mode_ != mode) {
             mode_ = mode;
             coeffsDirty_ = true;
+            // Reset filter state when changing modes to avoid transients
+            // from incompatible delay line values
+            reset();
         }
     }
     

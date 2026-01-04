@@ -78,14 +78,19 @@ int app_main(const char* midiDevice) {
         
         auto voiceAllocator = std::make_unique<midi::SimpleVoiceAllocator>(MAX_VOICES, voiceFactory);
         
+        // Print header for CC parameter table
+        std::cout << std::endl;
+        std::cout << "CC# | Val | WavShp | Cutoff(Hz) | Q     | Mode | FEnvAmt" << std::endl;
+        std::cout << "----+-----+--------+------------+-------+------+--------" << std::endl;
+        
         // Define CC mapping (glue code - maps MIDI controls to synth parameters)
         auto ccMapper = [&filterMode](uint8_t channel, uint8_t cc, uint8_t value, midi::SynthVoiceAllocator& allocator) {
             float normalized = static_cast<float>(value) / 127.0f;
             
             switch(cc) {
-                case 1:  // Modulation wheel -> timbre
+                case 1:  // Modulation wheel -> waveform shape
                     allocator.forEachVoice([normalized](midi::Synth& voice) {
-                        voice.setTimbre(normalized);
+                        static_cast<synth::WavetableSynth&>(voice).getOscillator().updateWavetable(normalized);
                     });
                     break;
                 case 20: {// C1 -> Filter cutoff
@@ -95,7 +100,7 @@ int app_main(const char* midiDevice) {
                         const float MAX_CUTOFF = 10000.0f;
                         float cutoff = MIN_CUTOFF * std::pow(MAX_CUTOFF / MIN_CUTOFF, normalized);
                         allocator.forEachVoice([cutoff](midi::Synth& voice) {
-                            static_cast<synth::WavetableSynth&>(voice).getFilter().setCutoff(cutoff);
+                            static_cast<synth::WavetableSynth&>(voice).setBaseCutoff(cutoff);
                         });
                     }
                     break;
@@ -104,14 +109,15 @@ int app_main(const char* midiDevice) {
                         static_cast<synth::WavetableSynth&>(voice).getFilter().setQ(normalized * 20.0f); // Q range 0.1 to 20.0
                     });
                     break;
-                case 96: // C18 button
-                    allocator.forEachVoice([normalized, &filterMode](midi::Synth& voice) {
-                        // cycle through filter modes on each press
-                        if (normalized > 0.5f) {
-                            filterMode = synth::BiquadFilter::nextMode(filterMode);
-                            static_cast<synth::WavetableSynth&>(voice).getFilter().setMode(filterMode);
-                        }
-                    });
+                case 96: {// C18 button
+                        filterMode = synth::BiquadFilter::nextMode(filterMode);
+                        allocator.forEachVoice([normalized, &filterMode](midi::Synth& voice) {
+                            // cycle through filter modes on each press
+                            if (normalized > 0.5f) {
+                                static_cast<synth::WavetableSynth&>(voice).getFilter().setMode(filterMode);
+                            }
+                        });
+                    }
                     break;
                 
                 default:
@@ -119,6 +125,28 @@ int app_main(const char* midiDevice) {
                           << " value " << static_cast<int>(value) << std::endl;
                     break;
             }
+            
+            // Print current parameters (table row) after processing CC
+            allocator.forEachVoice([&](midi::Synth& voice) {
+                auto* v = static_cast<synth::WavetableSynth*>(&voice);
+                const char* modeStr = "???";
+                switch(v->getFilter().getMode()) {
+                    case synth::BiquadFilter::Mode::LOWPASS:  modeStr = "LP"; break;
+                    case synth::BiquadFilter::Mode::HIGHPASS: modeStr = "HP"; break;
+                    case synth::BiquadFilter::Mode::BANDPASS: modeStr = "BP"; break;
+                    case synth::BiquadFilter::Mode::NOTCH:    modeStr = "NT"; break;
+                    case synth::BiquadFilter::Mode::ALLPASS:  modeStr = "AP"; break;
+                    default: break;
+                }
+                
+                printf("%3d | %3d | %6.3f | %10.1f | %5.2f | %4s | %7.3f\n",
+                    cc, value,
+                    normalized,  // WaveShape (normalized CC value as proxy)
+                    v->getBaseCutoff(),
+                    v->getFilter().getQ(),
+                    modeStr,
+                    v->getFilterEnvelopeAmount());
+            });
         };
         
         // Poly aftertouch mapping (continuous per-note pressure -> per-voice control)

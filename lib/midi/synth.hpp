@@ -50,12 +50,6 @@ namespace midi {
     virtual void setFrequency(float frequencyHz) = 0;
     
     /**
-     * @brief Update the timbre characteristics of the synthesizer
-     * @param timbre The timbre value (range 0.0 to 1.0)
-     */
-    virtual void setTimbre(float timbre) = 0;
-    
-    /**
      * @brief Update the volume level of the synthesizer
      * @param volume The volume level (0.0 to 1.0)
      */

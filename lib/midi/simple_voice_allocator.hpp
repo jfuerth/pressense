@@ -48,13 +48,12 @@ namespace midi {
      * @param factory Function that creates new Synth instances
      */
     SimpleVoiceAllocator(uint8_t maxVoices, VoiceFactory factory)
-        : SynthVoiceAllocator(maxVoices)
-        , voiceFactory(factory) {
+        : SynthVoiceAllocator(maxVoices) {
         voices.reserve(maxVoices);
         
         // Pre-cache all voices to avoid dynamic allocation during real-time operation
         for (uint8_t i = 0; i < maxVoices; ++i) {
-            voices.emplace_back(voiceFactory());
+            voices.emplace_back(factory());
         }
     }
     
@@ -138,7 +137,6 @@ namespace midi {
     }
     
   private:
-    VoiceFactory voiceFactory;
     std::vector<AllocatedVoice> voices;
     size_t lastAllocatedIndex = 0;
   };
