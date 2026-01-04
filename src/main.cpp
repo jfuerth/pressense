@@ -73,14 +73,71 @@ int app_main(const char* midiDevice) {
         auto voiceFactory = [SAMPLE_RATE]() -> std::unique_ptr<midi::Synth> {
             return std::make_unique<synth::WavetableSynth>(static_cast<float>(SAMPLE_RATE));
         };
+
+        synth::BiquadFilter::Mode filterMode = synth::BiquadFilter::Mode::LOWPASS;
         
         auto voiceAllocator = std::make_unique<midi::SimpleVoiceAllocator>(MAX_VOICES, voiceFactory);
         
-        // Keep a reference to the allocator before moving it
-        midi::SimpleVoiceAllocator* allocatorPtr = voiceAllocator.get();
+        // Define CC mapping (glue code - maps MIDI controls to synth parameters)
+        auto ccMapper = [&filterMode](uint8_t channel, uint8_t cc, uint8_t value, midi::SynthVoiceAllocator& allocator) {
+            float normalized = static_cast<float>(value) / 127.0f;
+            
+            switch(cc) {
+                case 1:  // Modulation wheel -> timbre
+                    allocator.forEachVoice([normalized](midi::Synth& voice) {
+                        voice.setTimbre(normalized);
+                    });
+                    break;
+                case 20: {// C1 -> Filter cutoff
+                        // Use exponential mapping for more musical response
+                        // Range: 100Hz to 10kHz
+                        const float MIN_CUTOFF = 100.0f;
+                        const float MAX_CUTOFF = 10000.0f;
+                        float cutoff = MIN_CUTOFF * std::pow(MAX_CUTOFF / MIN_CUTOFF, normalized);
+                        allocator.forEachVoice([cutoff](midi::Synth& voice) {
+                            static_cast<synth::WavetableSynth&>(voice).getFilter().setCutoff(cutoff);
+                        });
+                    }
+                    break;
+                case 21: // C2 -> Filter resonance
+                    allocator.forEachVoice([normalized](midi::Synth& voice) {
+                        static_cast<synth::WavetableSynth&>(voice).getFilter().setQ(normalized * 20.0f); // Q range 0.1 to 20.0
+                    });
+                    break;
+                case 96: // C18 button
+                    allocator.forEachVoice([normalized, &filterMode](midi::Synth& voice) {
+                        // cycle through filter modes on each press
+                        if (normalized > 0.5f) {
+                            filterMode = synth::BiquadFilter::nextMode(filterMode);
+                            static_cast<synth::WavetableSynth&>(voice).getFilter().setMode(filterMode);
+                        }
+                    });
+                    break;
+                
+                default:
+                    std::cout << "Unhandled CC #" << static_cast<int>(cc) 
+                          << " value " << static_cast<int>(value) << std::endl;
+                    break;
+            }
+        };
         
-        // Create MIDI stream processor (listening on channel 0)
-        midi::StreamProcessor midiProcessor(std::move(voiceAllocator), 0);
+        // Poly aftertouch mapping (continuous per-note pressure -> per-voice control)
+        auto polyAftertouchMapper = [](uint8_t channel, uint8_t note, uint8_t pressure, midi::Synth& voice) {
+            // TODO: Map pressure to per-voice parameter
+            // The way pressure maps to synth parameters will be highly customizable at run time based
+            // on knobs on the keyboard. For example, we might affect the following:
+            // - Filter cutoff
+            // - Amplitude (volume)
+            // - LFO depth/rate
+            //   - filter mix/depth
+            //   - vibrato/tremolo speed (also for filters... Assign to LFO?)
+            //   - vibrato/tremolo depth
+            // - fine tune
+            // - second oscillator detune 
+        };
+        
+        // Create MIDI stream processor with callbacks
+        midi::StreamProcessor midiProcessor(std::move(voiceAllocator), 0, ccMapper, polyAftertouchMapper);
         std::cout << "MIDI processor ready with " << static_cast<int>(MAX_VOICES) << " voices" << std::endl;
         
         // Main audio loop
@@ -97,7 +154,7 @@ int app_main(const char* midiDevice) {
                 
                 // Get all voices and mix them
                 std::vector<synth::WavetableSynth*> activeSynths;
-                allocatorPtr->forEachVoice([&](midi::Synth& synth) {
+                midiProcessor.forEachVoice([&](midi::Synth& synth) {
                     activeSynths.push_back(static_cast<synth::WavetableSynth*>(&synth));
                 });
                 

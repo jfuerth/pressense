@@ -4,6 +4,7 @@
 #include "synth_voice_allocator.hpp"
 #include "synth.hpp"
 #include <memory>
+#include <functional>
 
 namespace midi {
 
@@ -13,20 +14,46 @@ namespace midi {
   static constexpr uint8_t COMMAND_MASK = 0xF0;
   static constexpr uint8_t NOTE_ON_COMMAND = 0x90;
   static constexpr uint8_t NOTE_OFF_COMMAND = 0x80;
+  static constexpr uint8_t POLY_AFTERTOUCH_COMMAND = 0xA0;
   static constexpr uint8_t CONTROL_CHANGE_COMMAND = 0xB0;
   static constexpr uint8_t PITCH_BEND_COMMAND = 0xE0;
   static constexpr uint8_t SYSTEM_REALTIME_MIN = 0xF8;
   static constexpr uint8_t SYSTEM_REALTIME_MAX = 0xFF;
 
+  // Callback types for application-level MIDI control mapping
+  
+  /**
+   * @brief Callback for control change messages (global voice control)
+   * @param channel MIDI channel (0-15)
+   * @param cc Controller number (0-127)
+   * @param value Controller value (0-127)
+   * @param allocator Reference to voice allocator for forEachVoice() access
+   */
+  using ControlChangeCallback = std::function<void(
+    uint8_t channel, 
+    uint8_t cc, 
+    uint8_t value, 
+    SynthVoiceAllocator& allocator)>;
+  
+  /**
+   * @brief Callback for polyphonic aftertouch messages (per-voice control)
+   * @param channel MIDI channel (0-15)
+   * @param note MIDI note number (0-127)
+   * @param pressure Aftertouch pressure (0-127)
+   * @param voice Reference to the specific voice for this note
+   */
+  using PolyAftertouchCallback = std::function<void(
+    uint8_t channel,
+    uint8_t note,
+    uint8_t pressure,
+    Synth& voice)>;
+
   /**
    * @brief Concrete class for processing MIDI data streams
    * 
    * This class processes MIDI byte streams and routes them to a synthesizer
-   * using a pluggable channel allocator for voice management. Both the
-   * synthesizer and channel allocator can be customized via dependency injection.
-   * 
-   * The voice allocator now provides existingVoiceFor() method to safely handle
-   * note-off events without stealing voices that were already reassigned to different notes.
+   * using a pluggable channel allocator for voice management. Control mapping
+   * is delegated to application-level callbacks for flexibility.
    */
   class StreamProcessor {
   public:
@@ -34,10 +61,14 @@ namespace midi {
      * @brief Construct a StreamProcessor with custom synth and voice allocator
      * @param voiceAllocator Unique pointer to the voice allocator implementation
      * @param listenChannel MIDI channel to listen to (0-15)
+     * @param ccCallback Optional callback for control change messages
+     * @param polyAftertouchCallback Optional callback for poly aftertouch messages
      */
     StreamProcessor(
       std::unique_ptr<SynthVoiceAllocator> voiceAllocator,
-      uint8_t listenChannel = 0);
+      uint8_t listenChannel = 0,
+      ControlChangeCallback ccCallback = nullptr,
+      PolyAftertouchCallback polyAftertouchCallback = nullptr);
 
     StreamProcessor(StreamProcessor&& other) = default;
     StreamProcessor& operator=(StreamProcessor&& other) = default;
@@ -55,12 +86,26 @@ namespace midi {
      */
     void process(const uint8_t data);
     
+    /**
+     * @brief Iterate over all voices, whether active or not
+     * @param func Function to call for each voice
+     * 
+     * Provides access to voices for audio rendering without exposing allocator.
+     */
+    void forEachVoice(std::function<void(Synth&)> func) {
+      synthVoiceAllocator->forEachVoice(func);
+    }
+    
   private:
 
     /**
      * @brief Voice allocator for managing synthesizer voices
      */
     std::unique_ptr<SynthVoiceAllocator> synthVoiceAllocator;
+
+    // Application-level control mapping callbacks
+    ControlChangeCallback controlChangeCallback;
+    PolyAftertouchCallback polyAftertouchCallback;
 
     uint8_t listenChannel = 0;  // MIDI channel to listen to (0-15)
     

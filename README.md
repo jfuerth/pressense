@@ -26,7 +26,7 @@ Notes:
 * `midi::SimpleVoiceAllocator` implements `midi::SynthVoiceAllocator`.
   * The voice allocator owns the instances of `synth::WavetableSynth` and manages their lifecycles based on which note triggered them
   * `midi::SimpleVoiceAllocator` uses a factory function (supplied to its constructor) to create the Synth instances during construction
-* Dynamic memory allocation is confined to setup and tear-down time; no allocations happen while the synths are running
+* Dynamic memory allocation is confined to setup and tear-down time; no heap allocations happen while the synths are running
 
 ## Build and Run
 

@@ -22,9 +22,14 @@ public:
         HIGHPASS,
         BANDPASS,
         NOTCH,
-        ALLPASS
+        ALLPASS,
+        __COUNT
     };
     
+    static Mode nextMode(Mode current) {
+        return static_cast<Mode>((static_cast<int>(current) + 1) % static_cast<int>(Mode::__COUNT));
+    }
+
     BiquadFilter(float sampleRate = 44100.0f)
         : sampleRate_(sampleRate) {
         reset();

@@ -54,16 +54,6 @@ public:
     
     void setTimbre(float timbre) override {
         timbre_ = timbre;
-        
-        // Map timbre [0, 1] to filter cutoff frequency
-        // Use exponential mapping for more musical response
-        // Range: 100Hz (timbre=0) to 10kHz (timbre=1)
-        const float MIN_CUTOFF = 100.0f;
-        const float MAX_CUTOFF = 10000.0f;
-        float cutoff = MIN_CUTOFF * std::pow(MAX_CUTOFF / MIN_CUTOFF, timbre);
-        filter_.setCutoff(cutoff);
-        
-        // Also morph the waveform (original behavior)
         oscillator_.updateWavetable(timbre);
     }
     
@@ -85,6 +75,10 @@ public:
     
     bool isActive() const override {
         return envelope_.isActive();
+    }
+
+    BiquadFilter& getFilter() {
+        return filter_;
     }
     
     /**

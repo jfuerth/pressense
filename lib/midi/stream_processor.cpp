@@ -6,8 +6,12 @@ namespace midi {
 
 StreamProcessor::StreamProcessor(
         std::unique_ptr<SynthVoiceAllocator> voiceAllocator,
-        uint8_t listenChannel)
+        uint8_t listenChannel,
+        ControlChangeCallback ccCallback,
+        PolyAftertouchCallback polyAftertouchCallback)
     : synthVoiceAllocator(std::move(voiceAllocator))
+    , controlChangeCallback(ccCallback)
+    , polyAftertouchCallback(polyAftertouchCallback)
     , listenChannel(listenChannel)
 {
     // Constructor implementation - dependencies are moved and stored
@@ -92,18 +96,25 @@ void StreamProcessor::process(const uint8_t data)
             Synth& voice = synthVoiceAllocator->allocate(note);
             voice.release();
 
+        } else if (currentCommand == (POLY_AFTERTOUCH_COMMAND)) {
+            uint8_t note = messageByte1;
+            uint8_t pressure = data;
+            
+            // Poly aftertouch affects only the specific note's voice
+            Synth* voice = synthVoiceAllocator->findAllocated(note);
+            if (voice && polyAftertouchCallback) {
+                polyAftertouchCallback(listenChannel, note, pressure, *voice);
+            }
+
         } else if (currentCommand == (CONTROL_CHANGE_COMMAND) && messageByte1 < 120) {
             uint8_t controllerNumber = messageByte1;
             uint8_t controllerValue = data;
 
-            synthVoiceAllocator->forEachVoice([controllerNumber, controllerValue](Synth& voice) {
-                // Special: Handle Modulation Wheel (controller 1)
-                if (controllerNumber == 1) {
-                    float timbre = static_cast<float>(controllerValue) / 127.0f;
-                    voice.setTimbre(timbre);
-                }
-                // TODO: general handling for other controllers as needed
-            });
+            // Delegate to application callback if provided
+            if (controlChangeCallback) {
+                controlChangeCallback(listenChannel, controllerNumber, controllerValue, *synthVoiceAllocator);
+            }
+            // Otherwise, no default behavior (application must provide mapping)
 
         } else if (currentCommand == (PITCH_BEND_COMMAND)) {
             uint8_t lsb = messageByte1;
