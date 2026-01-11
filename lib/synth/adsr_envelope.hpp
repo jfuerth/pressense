@@ -142,6 +142,14 @@ public:
     }
     
     /**
+     * @brief Get ADSR parameter values
+     */
+    inline float getAttackTime() const { return attackTime_; }
+    inline float getDecayTime() const { return decayTime_; }
+    inline float getSustainLevel() const { return sustainLevel_; }
+    inline float getReleaseTime() const { return releaseTime_; }
+    
+    /**
      * @brief Reset envelope to idle state
      */
     inline void reset() {

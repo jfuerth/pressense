@@ -80,8 +80,8 @@ int app_main(const char* midiDevice) {
         
         // Print header for CC parameter table
         std::cout << std::endl;
-        std::cout << "CC# | Val | WavShp | Cutoff(Hz) | Q     | Mode | FEnvAmt" << std::endl;
-        std::cout << "----+-----+--------+------------+-------+------+--------" << std::endl;
+        std::cout << "CC# | Val | WavShp | Cutoff(Hz) | Q     | Mode | FEnvAmt | FEnvA(s) | FEnvD(s) | FEnvS | FEnvR(s)" << std::endl;
+        std::cout << "----+-----+--------+------------+-------+------+---------+----------+----------+-------+---------" << std::endl;
         
         // Define CC mapping (glue code - maps MIDI controls to synth parameters)
         auto ccMapper = [&filterMode](uint8_t channel, uint8_t cc, uint8_t value, midi::SynthVoiceAllocator& allocator) {
@@ -107,6 +107,29 @@ int app_main(const char* midiDevice) {
                 case 21: // C2 -> Filter resonance
                     allocator.forEachVoice([normalized](midi::Synth& voice) {
                         static_cast<synth::WavetableSynth&>(voice).getFilter().setQ(normalized * 20.0f); // Q range 0.1 to 20.0
+                    });
+                    break;
+                case 71: // C3 -> Filter envelope attack time
+                    allocator.forEachVoice([normalized](midi::Synth& voice) {
+                        float attackTime = 0.001f + normalized * 2.0f; // 1ms to 2s
+                        static_cast<synth::WavetableSynth&>(voice).getFilterEnvelope().setAttackTime(attackTime);
+                    });
+                    break;
+                case 72: // C4 -> Filter envelope decay time
+                    allocator.forEachVoice([normalized](midi::Synth& voice) {
+                        float decayTime = 0.01f + normalized * 5.0f; // 10ms to 5s
+                        static_cast<synth::WavetableSynth&>(voice).getFilterEnvelope().setDecayTime(decayTime);
+                    });
+                    break;
+                case 25: // C5 -> Filter envelope sustain level
+                    allocator.forEachVoice([normalized](midi::Synth& voice) {
+                        static_cast<synth::WavetableSynth&>(voice).getFilterEnvelope().setSustainLevel(normalized);
+                    });
+                    break;
+                case 73: // C6 -> Filter envelope release time
+                    allocator.forEachVoice([normalized](midi::Synth& voice) {
+                        float releaseTime = 0.01f + normalized * 5.0f; // 10ms to 5s
+                        static_cast<synth::WavetableSynth&>(voice).getFilterEnvelope().setReleaseTime(releaseTime);
                     });
                     break;
                 case 96: {// C18 button
@@ -139,13 +162,17 @@ int app_main(const char* midiDevice) {
                     default: break;
                 }
                 
-                printf("%3d | %3d | %6.3f | %10.1f | %5.2f | %4s | %7.3f\n",
+                printf("%3d | %3d | %6.3f | %10.1f | %5.2f | %4s | %7.3f | %8.3f | %8.3f | %5.3f | %8.3f\n",
                     cc, value,
                     normalized,  // WaveShape (normalized CC value as proxy)
                     v->getBaseCutoff(),
                     v->getFilter().getQ(),
                     modeStr,
-                    v->getFilterEnvelopeAmount());
+                    v->getFilterEnvelopeAmount(),
+                    v->getFilterEnvelope().getAttackTime(),
+                    v->getFilterEnvelope().getDecayTime(),
+                    v->getFilterEnvelope().getSustainLevel(),
+                    v->getFilterEnvelope().getReleaseTime());
             });
         };
         
