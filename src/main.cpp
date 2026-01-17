@@ -3,6 +3,7 @@
 #include <alsa_midi_in.hpp>
 #include <stream_processor.hpp>
 #include <simple_voice_allocator.hpp>
+#include <program_data.hpp>
 #include <iostream>
 #include <memory>
 #include <csignal>
@@ -78,13 +79,26 @@ int app_main(const char* midiDevice) {
         
         auto voiceAllocator = std::make_unique<midi::SimpleVoiceAllocator>(MAX_VOICES, voiceFactory);
         
+        // Program management
+        midi::ProgramData clipboard;  // Clipboard for copy/paste
+        uint8_t currentProgram = 1;   // Start on program 1
+        
+        // Load program 1 or use defaults
+        midi::ProgramData currentProgramData;
+        if (currentProgramData.loadFromFile(currentProgram)) {
+            currentProgramData.applyToVoices(*voiceAllocator);
+        } else {
+            std::cout << "Program " << static_cast<int>(currentProgram) 
+                      << " not found, using defaults" << std::endl;
+        }
+        
         // Print header for CC parameter table
         std::cout << std::endl;
         std::cout << "CC# | Val | WavShp | Cutoff(Hz) | Q     | Mode | FEnvAmt | FEnvA(s) | FEnvD(s) | FEnvS | FEnvR(s)" << std::endl;
         std::cout << "----+-----+--------+------------+-------+------+---------+----------+----------+-------+---------" << std::endl;
         
         // Define CC mapping (glue code - maps MIDI controls to synth parameters)
-        auto ccMapper = [&filterMode](uint8_t channel, uint8_t cc, uint8_t value, midi::SynthVoiceAllocator& allocator) {
+        auto ccMapper = [&](uint8_t channel, uint8_t cc, uint8_t value, midi::SynthVoiceAllocator& allocator) {
             float normalized = static_cast<float>(value) / 127.0f;
             
             switch(cc) {
@@ -132,14 +146,38 @@ int app_main(const char* midiDevice) {
                         static_cast<synth::WavetableSynth&>(voice).getFilterEnvelope().setReleaseTime(releaseTime);
                     });
                     break;
-                case 96: {// C18 button
-                        filterMode = synth::BiquadFilter::nextMode(filterMode);
-                        allocator.forEachVoice([normalized, &filterMode](midi::Synth& voice) {
-                            // cycle through filter modes on each press
-                            if (normalized > 0.5f) {
-                                static_cast<synth::WavetableSynth&>(voice).getFilter().setMode(filterMode);
-                            }
-                        });
+                case 96: {// C18 button -> cycle filter mode
+                        if (normalized > 0.5f) {
+                            // Cycle mode once, then apply to all voices
+                            synth::BiquadFilter::Mode newMode;
+                            bool modeSet = false;
+                            allocator.forEachVoice([&newMode, &modeSet](midi::Synth& voice) {
+                                auto& ws = static_cast<synth::WavetableSynth&>(voice);
+                                if (!modeSet) {
+                                    newMode = synth::BiquadFilter::nextMode(ws.getFilter().getMode());
+                                    modeSet = true;
+                                }
+                                ws.getFilter().setMode(newMode);
+                            });
+                        }
+                    }
+                    break;
+                case 103: // Copy to clipboard
+                    if (normalized > 0.5f) {
+                        clipboard.captureFromVoices(allocator);
+                        std::cout << "Copied current settings to clipboard" << std::endl;
+                    }
+                    break;
+                case 104: // Paste from clipboard
+                    if (normalized > 0.5f) {
+                        if (currentProgram == 1) {
+                            std::cout << "ERROR: Cannot paste into program 1 (protected)" << std::endl;
+                        } else {
+                            clipboard.applyToVoices(allocator);
+                            clipboard.saveToFile(currentProgram);
+                            std::cout << "Pasted clipboard to program " 
+                                      << static_cast<int>(currentProgram) << std::endl;
+                        }
                     }
                     break;
                 
@@ -176,6 +214,22 @@ int app_main(const char* midiDevice) {
             });
         };
         
+        // Program change callback
+        auto programChangeMapper = [&](uint8_t channel, uint8_t program, midi::SynthVoiceAllocator& allocator) {
+            currentProgram = program;
+            
+            midi::ProgramData programData;
+            if (programData.loadFromFile(program)) {
+                programData.applyToVoices(allocator);
+                std::cout << "Loaded program " << static_cast<int>(program) << std::endl;
+            } else {
+                // Use defaults if file doesn't exist
+                programData.applyToVoices(allocator);
+                std::cout << "Program " << static_cast<int>(program) 
+                          << " not found, using defaults" << std::endl;
+            }
+        };
+        
         // Poly aftertouch mapping (continuous per-note pressure -> per-voice control)
         auto polyAftertouchMapper = [](uint8_t channel, uint8_t note, uint8_t pressure, midi::Synth& voice) {
             // TODO: Map pressure to per-voice parameter
@@ -192,7 +246,7 @@ int app_main(const char* midiDevice) {
         };
         
         // Create MIDI stream processor with callbacks
-        midi::StreamProcessor midiProcessor(std::move(voiceAllocator), 0, ccMapper, polyAftertouchMapper);
+        midi::StreamProcessor midiProcessor(std::move(voiceAllocator), 0, ccMapper, polyAftertouchMapper, programChangeMapper);
         std::cout << "MIDI processor ready with " << static_cast<int>(MAX_VOICES) << " voices" << std::endl;
         
         // Main audio loop

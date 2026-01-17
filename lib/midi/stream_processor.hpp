@@ -16,6 +16,7 @@ namespace midi {
   static constexpr uint8_t NOTE_OFF_COMMAND = 0x80;
   static constexpr uint8_t POLY_AFTERTOUCH_COMMAND = 0xA0;
   static constexpr uint8_t CONTROL_CHANGE_COMMAND = 0xB0;
+  static constexpr uint8_t PROGRAM_CHANGE_COMMAND = 0xC0;
   static constexpr uint8_t PITCH_BEND_COMMAND = 0xE0;
   static constexpr uint8_t SYSTEM_REALTIME_MIN = 0xF8;
   static constexpr uint8_t SYSTEM_REALTIME_MAX = 0xFF;
@@ -47,6 +48,17 @@ namespace midi {
     uint8_t note,
     uint8_t pressure,
     Synth& voice)>;
+  
+  /**
+   * @brief Callback for program change messages
+   * @param channel MIDI channel (0-15)
+   * @param program Program number (0-127)
+   * @param allocator Reference to voice allocator for forEachVoice() access
+   */
+  using ProgramChangeCallback = std::function<void(
+    uint8_t channel,
+    uint8_t program,
+    SynthVoiceAllocator& allocator)>;
 
   /**
    * @brief Concrete class for processing MIDI data streams
@@ -63,12 +75,14 @@ namespace midi {
      * @param listenChannel MIDI channel to listen to (0-15)
      * @param ccCallback Optional callback for control change messages
      * @param polyAftertouchCallback Optional callback for poly aftertouch messages
+     * @param programChangeCallback Optional callback for program change messages
      */
     StreamProcessor(
       std::unique_ptr<SynthVoiceAllocator> voiceAllocator,
       uint8_t listenChannel = 0,
       ControlChangeCallback ccCallback = nullptr,
-      PolyAftertouchCallback polyAftertouchCallback = nullptr);
+      PolyAftertouchCallback polyAftertouchCallback = nullptr,
+      ProgramChangeCallback programChangeCallback = nullptr);
 
     StreamProcessor(StreamProcessor&& other) = default;
     StreamProcessor& operator=(StreamProcessor&& other) = default;
@@ -106,6 +120,7 @@ namespace midi {
     // Application-level control mapping callbacks
     ControlChangeCallback controlChangeCallback;
     PolyAftertouchCallback polyAftertouchCallback;
+    ProgramChangeCallback programChangeCallback;
 
     uint8_t listenChannel = 0;  // MIDI channel to listen to (0-15)
     

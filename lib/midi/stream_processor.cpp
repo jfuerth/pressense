@@ -8,10 +8,12 @@ StreamProcessor::StreamProcessor(
         std::unique_ptr<SynthVoiceAllocator> voiceAllocator,
         uint8_t listenChannel,
         ControlChangeCallback ccCallback,
-        PolyAftertouchCallback polyAftertouchCallback)
+        PolyAftertouchCallback polyAftertouchCallback,
+        ProgramChangeCallback programChangeCallback)
     : synthVoiceAllocator(std::move(voiceAllocator))
     , controlChangeCallback(ccCallback)
     , polyAftertouchCallback(polyAftertouchCallback)
+    , programChangeCallback(programChangeCallback)
     , listenChannel(listenChannel)
 {
     // Constructor implementation - dependencies are moved and stored
@@ -115,6 +117,14 @@ void StreamProcessor::process(const uint8_t data)
                 controlChangeCallback(listenChannel, controllerNumber, controllerValue, *synthVoiceAllocator);
             }
             // Otherwise, no default behavior (application must provide mapping)
+
+        } else if (currentCommand == (PROGRAM_CHANGE_COMMAND)) {
+            uint8_t programNumber = data;  // Program Change is 1-byte message, data comes directly
+            
+            // Delegate to application callback if provided
+            if (programChangeCallback) {
+                programChangeCallback(listenChannel, programNumber, *synthVoiceAllocator);
+            }
 
         } else if (currentCommand == (PITCH_BEND_COMMAND)) {
             uint8_t lsb = messageByte1;

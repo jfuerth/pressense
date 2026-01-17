@@ -32,6 +32,8 @@ public:
         if (shape < 0.0f) shape = 0.0f;
         if (shape > 1.0f) shape = 1.0f;
         
+        shape_ = shape;  // Store for later retrieval
+        
         for (size_t i = 0; i < TABLE_SIZE; ++i) {
             float t = static_cast<float>(i) / TABLE_SIZE;
             
@@ -102,11 +104,19 @@ public:
         while (phase_ >= 1.0f) phase_ -= 1.0f;
         while (phase_ < 0.0f) phase_ += 1.0f;
     }
+    
+    /**
+     * @brief Get current waveform shape
+     */
+    inline float getShape() const {
+        return shape_;
+    }
 
 private:
     float wavetable_[TABLE_SIZE];
     float phase_ = 0.0f;
     float sampleRate_;
+    float shape_ = 0.0f;  // Current waveform shape
 };
 
 } // namespace synth
