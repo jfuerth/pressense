@@ -157,6 +157,10 @@ public:
         
         // Apply modulation (exponential, upward only)
         float modulatedCutoff = baseCutoff_ * (1.0f + envModulation * 9.0f);  // Up to 10x base cutoff
+        
+        // PERF: This triggers coefficient recalculation every sample during envelope movement.
+        // If polyphony is limited on embedded (ESP32/RP2350), consider quantizing cutoff changes
+        // or rate-limiting updates (e.g., update filter every N samples, interpolate between).
         filter_.setCutoff(modulatedCutoff);
         
         // Apply filter

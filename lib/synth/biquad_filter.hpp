@@ -13,7 +13,7 @@ namespace synth {
  * Coefficients are calculated using Robert Bristow-Johnson's formulas.
  * 
  * All methods are inline for optimal performance in the audio generation loop.
- * Coefficient calculation is lazy - only recalculated when parameters change.
+ * Coefficients are recalculated immediately when parameters change.
  */
 class BiquadFilter {
 public:
@@ -42,10 +42,10 @@ public:
     inline void setMode(Mode mode) {
         if (mode_ != mode) {
             mode_ = mode;
-            coeffsDirty_ = true;
             // Reset filter state when changing modes to avoid transients
             // from incompatible delay line values
             reset();
+            updateCoefficients();
         }
     }
     
@@ -61,7 +61,7 @@ public:
         
         if (cutoffHz_ != frequencyHz) {
             cutoffHz_ = frequencyHz;
-            coeffsDirty_ = true;
+            updateCoefficients();
         }
     }
     
@@ -78,7 +78,7 @@ public:
         
         if (q_ != q) {
             q_ = q;
-            coeffsDirty_ = true;
+            updateCoefficients();
         }
     }
     
@@ -88,11 +88,6 @@ public:
      * @return Filtered output sample
      */
     inline float processSample(float input) {
-        // Update coefficients if parameters changed
-        if (coeffsDirty_) {
-            updateCoefficients();
-        }
-        
         // Direct Form II Transposed implementation
         float output = b0_ * input + z1_;
         z1_ = b1_ * input - a1_ * output + z2_;
@@ -128,7 +123,7 @@ public:
 private:
     /**
      * @brief Calculate biquad coefficients using RBJ formulas
-     * Only called when parameters change (lazy evaluation).
+     * Called immediately when parameters change (eager evaluation).
      */
     inline void updateCoefficients() {
         const float PI = 3.14159265358979323846f;
@@ -195,8 +190,6 @@ private:
         b2_ = b2 / a0;
         a1_ = a1 / a0;
         a2_ = a2 / a0;
-        
-        coeffsDirty_ = false;
     }
     
     // Sample rate
@@ -214,9 +207,6 @@ private:
     // Filter state (Direct Form II Transposed)
     float z1_ = 0.0f;
     float z2_ = 0.0f;
-    
-    // Dirty flag for lazy coefficient update
-    bool coeffsDirty_ = true;
 };
 
 } // namespace synth
