@@ -4,6 +4,7 @@
 #include <stream_processor.hpp>
 #include <simple_voice_allocator.hpp>
 #include <program_data.hpp>
+#include <output_processor.hpp>
 #include <iostream>
 #include <memory>
 #include <csignal>
@@ -69,6 +70,9 @@ int app_main(const char* midiDevice) {
         std::cout << "Audio: " << audioSink.getSampleRate() << " Hz, " 
                   << audioSink.getChannels() << " channels, "
                   << audioSink.getBufferFrames() << " frames/buffer" << std::endl;
+        
+        // Create master output processor with switchable modes
+        synth::MasterOutputProcessor outputProcessor(0.5f);  // Start with normalized drive 0.5
         
         // Create voice allocator with wavetable synth factory
         auto voiceFactory = [SAMPLE_RATE]() -> std::unique_ptr<midi::Synth> {
@@ -146,6 +150,9 @@ int app_main(const char* midiDevice) {
                         static_cast<synth::WavetableSynth&>(voice).getFilterEnvelope().setReleaseTime(releaseTime);
                     });
                     break;
+                case 74: // C7 -> Output drive
+                    outputProcessor.setDrive(normalized);
+                    break;
                 case 96: {// C18 button -> cycle filter mode
                         if (normalized > 0.5f) {
                             // Cycle mode once, then apply to all voices
@@ -160,6 +167,13 @@ int app_main(const char* midiDevice) {
                                 ws.getFilter().setMode(newMode);
                             });
                         }
+                    }
+                    break;
+                case 102: // C24 button -> cycle output mode
+                    if (normalized > 0.5f) {
+                        outputProcessor.nextMode();
+                        std::cout << "Output mode: " << outputProcessor.getName() 
+                                  << " (drive=" << outputProcessor.getDrive() << ")" << std::endl;
                     }
                     break;
                 case 103: // Copy to clipboard
@@ -267,23 +281,29 @@ int app_main(const char* midiDevice) {
                     activeSynths.push_back(static_cast<synth::WavetableSynth*>(&synth));
                 });
                 
+                // Pass 1: Mix all voices into buffer (mono, using left channel position)
                 for (unsigned int frame = 0; frame < numFrames; ++frame) {
-                    // Mix all active voices
                     float sample = 0.0f;
                     for (auto* synth : activeSynths) {
                         sample += synth->nextSample();
                     }
-                    
-                    // Apply simple limiting to prevent clipping
-                    if (sample > 1.0f) sample = 1.0f;
-                    if (sample < -1.0f) sample = -1.0f;
-                    
-                    // Scale down to avoid clipping when multiple voices play
-                    sample *= 0.3f;
-                    
-                    // Write to stereo channels
-                    buffer[frame * CHANNELS + 0] = sample; // Left
-                    buffer[frame * CHANNELS + 1] = sample; // Right
+                    buffer[frame * CHANNELS] = sample;  // Store at left channel position
+                }
+                
+                // Pass 2: Process buffer in-place with output processor
+                // Extract mono samples to temporary buffer for processing
+                // TODO lost the in-place feature here
+                float monoBuffer[numFrames];
+                for (unsigned int frame = 0; frame < numFrames; ++frame) {
+                    monoBuffer[frame] = buffer[frame * CHANNELS];
+                }
+                outputProcessor.processBuffer(monoBuffer, numFrames);
+                
+                // Pass 3: Duplicate processed mono to stereo
+                for (unsigned int frame = 0; frame < numFrames; ++frame) {
+                    float processed = monoBuffer[frame];
+                    buffer[frame * CHANNELS + 0] = processed; // Left
+                    buffer[frame * CHANNELS + 1] = processed; // Right
                 }
             });
         }

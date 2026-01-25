@@ -1,0 +1,11 @@
+{
+  "baseCutoff": 172.2742919921875,
+  "filterEnvAmount": 0.5,
+  "filterEnvAttack": 0.17422835528850555,
+  "filterEnvDecay": 0.5611810684204102,
+  "filterEnvRelease": 0.3249606192111969,
+  "filterEnvSustain": 0.23622047901153564,
+  "filterMode": 0,
+  "filterQ": 0.6299212574958801,
+  "waveformShape": 0.0
+}
