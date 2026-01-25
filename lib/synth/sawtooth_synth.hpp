@@ -34,7 +34,7 @@ public:
         filter_.setMode(BiquadFilter::Mode::LOWPASS);
         filter_.setQ(0.707f);  // Butterworth response
         
-        // Initialize filter envelope with faster attack/decay
+        // Initialize filter envelope with defaults
         filterEnvelope_.setAttackTime(0.005f);   // 5ms
         filterEnvelope_.setDecayTime(0.2f);      // 200ms
         filterEnvelope_.setSustainLevel(0.3f);

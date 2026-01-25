@@ -4,56 +4,32 @@
 #include <cmath>
 #include <vector>
 #include <memory>
+#include "biquad_filter.hpp"
 
 namespace synth {
 
 /**
- * @brief Base class for output processing effects (compression, limiting, distortion)
+ * @brief Base class for clipping/waveshaping algorithms
  * 
- * Output processors operate on mixed audio buffers to prevent clipping and add character.
- * All methods are inline for optimal performance in the audio generation loop.
- * Processing is done in-place to maximize cache locality and minimize memory usage.
+ * ClippingAlgorithms are pure strategy objects that implement the waveshaping
+ * transfer function. They are stateless and lightweight.
  */
-class OutputProcessor {
+class ClippingAlgorithm {
 public:
-    OutputProcessor(float initialDrive = 0.5f) : drive_(initialDrive) {}
-    virtual ~OutputProcessor() = default;
+    virtual ~ClippingAlgorithm() = default;
     
     /**
-     * @brief Process audio buffer in-place
-     * @param buffer Mono audio buffer to process
+     * @brief Apply clipping/waveshaping to an entire buffer in-place
+     * @param buffer Mono audio buffer to process in-place
      * @param numFrames Number of frames in buffer
+     * @param drive Amount to multiply each input sample by before clipping/waveshaping (controls intensity)
      */
-    virtual void processBuffer(float* buffer, unsigned int numFrames) = 0;
+    virtual void processBuffer(float* buffer, unsigned int numFrames, float drive) const = 0;
     
     /**
-     * @brief Set drive amount (normalized 0.0 to 1.0)
-     * @param drive Normalized drive parameter [0.0, 1.0]
-     *              Processors internally scale this to their useful range
-     */
-    virtual void setDrive(float drive) {
-        if (drive < 0.0f) drive = 0.0f;
-        if (drive > 1.0f) drive = 1.0f;
-        drive_ = drive;
-    }
-    
-    /**
-     * @brief Get current normalized drive amount [0.0, 1.0]
-     */
-    virtual float getDrive() const { return drive_; }
-    
-    /**
-     * @brief Get processor name for UI display
+     * @brief Get algorithm name for UI display
      */
     virtual const char* getName() const = 0;
-    
-    /**
-     * @brief Reset processor state (if stateful)
-     */
-    virtual void reset() {}
-    
-protected:
-    float drive_;  // Normalized drive [0.0, 1.0]
 };
 
 /**
@@ -67,18 +43,13 @@ protected:
  * - Drive = 1.0: Unity gain for small signals, soft limiting for large
  * - Drive > 1.0: Adds harmonic saturation/distortion
  */
-class TanhClipper : public OutputProcessor {
+class TanhClipping : public ClippingAlgorithm {
 public:
-    TanhClipper(float normalizedDrive = 0.5f) : OutputProcessor(normalizedDrive) {}
-    
     const char* getName() const override { return "TanhClipper"; }
     
-    void processBuffer(float* buffer, unsigned int numFrames) override {
-        // Map normalized drive [0, 1] to exponential range [0.1, 10.0]
-        // 0.0 → 0.1x, 0.5 → 1.0x (unity), 1.0 → 10.0x
-        float actualDrive = 0.1f * std::pow(100.0f, drive_);
+    void processBuffer(float* buffer, unsigned int numFrames, float drive) const override {
         for (unsigned int i = 0; i < numFrames; ++i) {
-            buffer[i] = std::tanh(buffer[i] * actualDrive);
+            buffer[i] = std::tanh(buffer[i] * drive);
         }
     }
 };
@@ -93,18 +64,13 @@ public:
  * Multiple folds can occur for large input signals, creating complex spectra.
  * Folds at fixed ±1.0 threshold; drive controls input gain.
  */
-class WaveFolderClipper : public OutputProcessor {
+class WaveFoldClipping : public ClippingAlgorithm {
 public:
-    WaveFolderClipper(float normalizedDrive = 0.5f) : OutputProcessor(normalizedDrive) {}
-    
     const char* getName() const override { return "WaveFolder"; }
     
-    void processBuffer(float* buffer, unsigned int numFrames) override {
-        // Map normalized drive [0, 1] to exponential range [0.1, 10.0]
-        // 0.0 → 0.1x, 0.5 → 1.0x (unity), 1.0 → 10.0x
-        float actualDrive = 0.1f * std::pow(100.0f, drive_);
+    void processBuffer(float* buffer, unsigned int numFrames, float drive) const override {
         for (unsigned int i = 0; i < numFrames; ++i) {
-            buffer[i] = wavefold(buffer[i] * actualDrive);
+            buffer[i] = wavefold(buffer[i] * drive);
         }
     }
     
@@ -134,22 +100,17 @@ private:
 /**
  * @brief Soft wave folder - folds with smooth rollover for warmer distortion
  * 
- * Similar to WaveFolderClipper but uses tanh to smooth the fold points,
+ * Similar to WaveFoldClipping but uses tanh to smooth the fold points,
  * creating a warmer, less aggressive character with reduced high harmonics.
  * Combines the folding concept with soft saturation at the peaks.
  */
-class SoftWaveFolderClipper : public OutputProcessor {
+class SoftWaveFoldClipping : public ClippingAlgorithm {
 public:
-    SoftWaveFolderClipper(float normalizedDrive = 0.5f) : OutputProcessor(normalizedDrive) {}
-    
     const char* getName() const override { return "SoftWaveFolder"; }
     
-    void processBuffer(float* buffer, unsigned int numFrames) override {
-        // Map normalized drive [0, 1] to exponential range [0.1, 10.0]
-        // 0.0 → 0.1x, 0.5 → 1.0x (unity), 1.0 → 10.0x
-        float actualDrive = 0.1f * std::pow(100.0f, drive_);
+    void processBuffer(float* buffer, unsigned int numFrames, float drive) const override {
         for (unsigned int i = 0; i < numFrames; ++i) {
-            buffer[i] = wavefoldSoft(buffer[i] * actualDrive);
+            buffer[i] = wavefoldSoft(buffer[i] * drive);
         }
     }
     
@@ -184,68 +145,121 @@ private:
 };
 
 /**
- * @brief Master output processor with switchable modes
+ * @brief Output processor with switchable clipping algorithms and post-filter
  * 
- * Manages multiple output processor types and allows runtime switching between them.
- * Available modes are allocated up front; switching is done by changing active index.
+ * Manages multiple clipping algorithms and allows runtime switching between them.
+ * Applies a shared post-filter after clipping to smooth high-frequency harmonics.
+ * 
+ * Processing chain: Input → Clipping Algorithm → Post-Filter → Output
  */
-class MasterOutputProcessor : public OutputProcessor {
+class OutputProcessor {
 public:
-    MasterOutputProcessor(float normalizedDrive = 0.5f) 
-        : OutputProcessor(normalizedDrive),
+    OutputProcessor(float normalizedDrive = 0.5f, float sampleRate = 44100.0f) 
+        : drive_(normalizedDrive),
+          postFilter_(sampleRate),
           activeIndex_(0) {
-        // Initialize all available processors
-        processors_.push_back(std::make_unique<TanhClipper>(normalizedDrive));
-        processors_.push_back(std::make_unique<WaveFolderClipper>(normalizedDrive));
-        processors_.push_back(std::make_unique<SoftWaveFolderClipper>(normalizedDrive));
+        // Initialize post-filter as a low-pass at 10kHz with Q=0.707 (Butterworth)
+        postFilter_.setMode(BiquadFilter::Mode::LOWPASS);
+        postFilter_.setCutoff(10000.0f);
+        postFilter_.setQ(0.707f);
+        
+        // Initialize all available clipping algorithms
+        algorithms_.push_back(std::make_unique<TanhClipping>());
+        algorithms_.push_back(std::make_unique<WaveFoldClipping>());
+        algorithms_.push_back(std::make_unique<SoftWaveFoldClipping>());
     }
     
     /**
-     * @brief Cycle to next processor mode
+     * @brief Process audio buffer in-place
+     * @param buffer Mono audio buffer to process
+     * @param numFrames Number of frames in buffer
+     * 
+     * Applies active clipping algorithm then post-filter in two passes.
+     * Two-pass approach reduces virtual function call overhead.
+     */
+    void processBuffer(float* buffer, unsigned int numFrames) {
+        // Map normalized drive [0, 1] to exponential range [0.1, 10.0]
+        // 0.0 → 0.1x, 0.5 → 1.0x (unity), 1.0 → 10.0x
+        float actualDrive = 0.1f * std::pow(100.0f, drive_);
+        
+        // Pass 1: Apply clipping/waveshaping (one virtual call per buffer)
+        algorithms_[activeIndex_]->processBuffer(buffer, numFrames, actualDrive);
+        
+        // Pass 2: Apply post-filter
+        for (unsigned int i = 0; i < numFrames; ++i) {
+            buffer[i] = postFilter_.processSample(buffer[i]);
+        }
+    }
+    
+    /**
+     * @brief Cycle to next clipping algorithm
+     * 
+     * Resets the post-filter state when switching to avoid transients
+     * from incompatible delay line values.
      */
     inline void nextMode() {
-        activeIndex_ = (activeIndex_ + 1) % processors_.size();
+        activeIndex_ = (activeIndex_ + 1) % algorithms_.size();
+        postFilter_.reset();  // Clear filter state on mode switch
     }
     
     /**
-     * @brief Get current processor index
+     * @brief Get current algorithm index
      */
     inline size_t getModeIndex() const {
         return activeIndex_;
     }
     
     /**
-     * @brief Set processor by index
+     * @brief Set algorithm by index
+     * 
+     * Resets the post-filter state when switching to avoid transients.
      */
     inline void setModeIndex(size_t index) {
-        if (index < processors_.size()) {
+        if (index < algorithms_.size() && index != activeIndex_) {
             activeIndex_ = index;
+            postFilter_.reset();  // Clear filter state on mode switch
         }
     }
     
-    void setDrive(float drive) override {
-        OutputProcessor::setDrive(drive);
-        for (auto& processor : processors_) {
-            processor->setDrive(drive);
-        }
+    /**
+     * @brief Set drive amount (normalized 0.0 to 1.0)
+     * @param drive Normalized drive parameter [0.0, 1.0]
+     *              Internally scaled to exponential range [0.1, 10.0]
+     */
+    void setDrive(float drive) {
+        if (drive < 0.0f) drive = 0.0f;
+        if (drive > 1.0f) drive = 1.0f;
+        drive_ = drive;
     }
     
-    const char* getName() const override {
-        return processors_[activeIndex_]->getName();
+    /**
+     * @brief Get current normalized drive amount [0.0, 1.0]
+     */
+    float getDrive() const { return drive_; }
+    
+    /**
+     * @brief Get current algorithm name for UI display
+     */
+    const char* getName() const {
+        return algorithms_[activeIndex_]->getName();
     }
     
-    void processBuffer(float* buffer, unsigned int numFrames) override {
-        processors_[activeIndex_]->processBuffer(buffer, numFrames);
+    /**
+     * @brief Reset post-filter state
+     */
+    void reset() {
+        postFilter_.reset();
     }
     
-    void reset() override {
-        for (auto& processor : processors_) {
-            processor->reset();
-        }
-    }
+    /**
+     * @brief Get reference to the post-filter for configuration
+     */
+    BiquadFilter& getPostFilter() { return postFilter_; }
     
 private:
-    std::vector<std::unique_ptr<OutputProcessor>> processors_;
+    float drive_;  // Normalized drive [0.0, 1.0]
+    BiquadFilter postFilter_;  // Low-pass filter applied after clipping/shaping
+    std::vector<std::unique_ptr<ClippingAlgorithm>> algorithms_;
     size_t activeIndex_;
 };
 

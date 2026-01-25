@@ -71,8 +71,8 @@ int app_main(const char* midiDevice) {
                   << audioSink.getChannels() << " channels, "
                   << audioSink.getBufferFrames() << " frames/buffer" << std::endl;
         
-        // Create master output processor with switchable modes
-        synth::MasterOutputProcessor outputProcessor(0.5f);  // Start with normalized drive 0.5
+        // Create output processor with switchable clipping algorithms
+        synth::OutputProcessor outputProcessor(0.5f, static_cast<float>(SAMPLE_RATE));
         
         // Create voice allocator with wavetable synth factory
         auto voiceFactory = [SAMPLE_RATE]() -> std::unique_ptr<midi::Synth> {
@@ -152,6 +152,18 @@ int app_main(const char* midiDevice) {
                     break;
                 case 74: // C7 -> Output drive
                     outputProcessor.setDrive(normalized);
+                    break;
+                case 70: {// C8 -> Post-filter cutoff
+                        // Use exponential mapping for more musical response
+                        // Range: 100Hz to 20kHz
+                        const float MIN_CUTOFF = 100.0f;
+                        const float MAX_CUTOFF = 20000.0f;
+                        float cutoff = MIN_CUTOFF * std::pow(MAX_CUTOFF / MIN_CUTOFF, normalized);
+                        outputProcessor.getPostFilter().setCutoff(cutoff);
+                    }
+                    break;
+                case 63: // C9 -> Post-filter resonance
+                    outputProcessor.getPostFilter().setQ(0.1f + normalized * 19.9f); // Q range 0.1 to 20.0
                     break;
                 case 96: {// C18 button -> cycle filter mode
                         if (normalized > 0.5f) {
