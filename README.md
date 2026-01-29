@@ -37,3 +37,17 @@ source ~/.platformio/penv/bin/activate
 pio run -e native
 .pio/build/native/program
 ```
+
+### ESP32 DEVKITV1
+
+```bash
+source ~/.platformio/penv/bin/activate
+pio run -e esp32dev
+```
+
+You might get a Python stack trace mentioning IntelHex. The library didn't auto-install for me. You can install it with:
+
+```bash
+source ~/.platformio/penv/bin/activate
+pip install intelhex
+```

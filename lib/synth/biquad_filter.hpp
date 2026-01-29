@@ -182,6 +182,16 @@ private:
                 a1 = -2.0f * cosw0;
                 a2 = 1.0f - alpha;
                 break;
+                
+            default:  // Handles Mode::__COUNT and any other invalid values
+                // Use lowpass as safe default
+                b0 = (1.0f - cosw0) / 2.0f;
+                b1 = 1.0f - cosw0;
+                b2 = (1.0f - cosw0) / 2.0f;
+                a0 = 1.0f + alpha;
+                a1 = -2.0f * cosw0;
+                a2 = 1.0f - alpha;
+                break;
         }
         
         // Normalize by a0

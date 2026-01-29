@@ -4,12 +4,16 @@
 #include <biquad_filter.hpp>
 #include <sawtooth_synth.hpp>
 #include <synth_voice_allocator.hpp>
-#include <json.hpp>  // nlohmann/json single-header
 #include <cstdint>
+
+#ifndef PLATFORM_ESP32
+#include <json.hpp>  // nlohmann/json single-header (Linux only)
 #include <fstream>
-#include <iostream>
 #include <sys/stat.h>
 #include <errno.h>
+#endif
+
+#include <cstdio>
 
 namespace midi {
 
@@ -35,8 +39,9 @@ struct ProgramData {
     float filterEnvSustain = 0.3f;
     float filterEnvRelease = 0.1f;
     
+#ifndef PLATFORM_ESP32
     /**
-     * @brief Save program data to JSON file
+     * @brief Save program data to JSON file (Linux only)
      * @param programNumber Program number (0-127)
      * @param bankNumber Bank number (default 0)
      * @return true if successful
@@ -76,7 +81,7 @@ struct ProgramData {
     }
     
     /**
-     * @brief Load program data from JSON file
+     * @brief Load program data from JSON file (Linux only)
      * @param programNumber Program number (0-127)
      * @param bankNumber Bank number (default 0)
      * @return true if successful (file exists and was parsed)
@@ -103,6 +108,7 @@ struct ProgramData {
             return false;
         }
     }
+#endif // PLATFORM_ESP32
     
     /**
      * @brief Apply program data to all voices
@@ -150,6 +156,7 @@ struct ProgramData {
         });
     }
     
+#ifndef PLATFORM_ESP32
     // Define JSON serialization using nlohmann macro (must be in same namespace)
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(ProgramData,
         waveformShape,
@@ -162,6 +169,7 @@ struct ProgramData {
         filterEnvSustain,
         filterEnvRelease
     )
+#endif
 };
 
 } // namespace midi
