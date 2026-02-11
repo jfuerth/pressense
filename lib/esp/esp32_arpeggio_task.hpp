@@ -71,7 +71,7 @@ private:
         const uint8_t notes[] = {60, 64, 67, 72};
         const uint8_t numNotes = sizeof(notes) / sizeof(notes[0]);
         const uint8_t channel = 0;
-        const uint8_t velocity = 100;
+        const uint8_t velocity = 0x10; // Low velocity while debugging DAC/amp volume
         
         uint8_t currentNote = 0;
         

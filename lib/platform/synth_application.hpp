@@ -255,24 +255,24 @@ private:
     
 #ifdef PLATFORM_ESP32
     void applyDefaultProgram(midi::SynthVoiceAllocator& allocator) {
-        // Default program: Simple saw wave with moderate filter
+        // Default program: Matches program_2.json
         allocator.forEachVoice([](midi::Synth& voice) {
             auto& ws = static_cast<synth::WavetableSynth&>(voice);
             
-            // Waveform: 50% saw/square mix
-            ws.getOscillator().updateWavetable(0.5f);
+            // Waveform: Pure sawtooth
+            ws.getOscillator().updateWavetable(0.0f);
             
-            // Filter: Low-pass at 2kHz, Q=1.0
-            ws.setBaseCutoff(2000.0f);
-            ws.getFilter().setQ(1.0f);
+            // Filter: Low-pass mode
             ws.getFilter().setMode(synth::BiquadFilter::Mode::LOWPASS);
+            ws.setBaseCutoff(222.0530242919922f);
+            ws.getFilter().setQ(3.9370079040527344f);
             
-            // Filter envelope: Quick attack, medium decay
-            ws.getFilterEnvelope().setAttackTime(0.01f);
-            ws.getFilterEnvelope().setDecayTime(0.5f);
-            ws.getFilterEnvelope().setSustainLevel(0.3f);
-            ws.getFilterEnvelope().setReleaseTime(0.2f);
-            ws.setFilterEnvelopeAmount(1.0f);
+            // Filter envelope
+            ws.getFilterEnvelope().setAttackTime(0.06399212777614594f);
+            ws.getFilterEnvelope().setDecayTime(0.24622048437595367f);
+            ws.getFilterEnvelope().setSustainLevel(0.023622047156095505f);
+            ws.getFilterEnvelope().setReleaseTime(0.3249606192111969f);
+            ws.setFilterEnvelopeAmount(0.5f);
             
             // Note: Amplitude envelope is configured in WavetableSynth constructor
         });

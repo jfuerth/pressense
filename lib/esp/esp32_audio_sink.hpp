@@ -39,7 +39,9 @@ public:
         : sampleRate_(sampleRate)
         , channels_(channels)
         , bufferFrames_(bufferFrames)
-        , i2sPort_(i2sPort) {
+        , i2sPort_(i2sPort)
+        , underrunCount_(0)
+        , partialWriteCount_(0) {
         
         // I2S configuration
         i2s_config_t i2s_config = {
@@ -55,7 +57,7 @@ public:
             .tx_desc_auto_clear = true,
             .fixed_mclk = 0,
             .mclk_multiple = I2S_MCLK_MULTIPLE_256,
-            .bits_per_chan = I2S_BITS_PER_CHAN_DEFAULT
+            .bits_per_chan = I2S_BITS_PER_CHAN_DEFAULT  // match bits_per_sample
         };
         
         // I2S pin configuration for PCM5102
@@ -83,14 +85,27 @@ public:
             return;
         }
         
+        // Get the actual sample rate achieved by the I2S hardware
+        // ESP32 I2S has limited clock divider options, so actual rate may differ
+        float actualSampleRateFloat = i2s_get_clk(i2sPort_);
+        uint32_t actualSampleRate = static_cast<uint32_t>(actualSampleRateFloat);
+        
+        if (actualSampleRate != sampleRate_) {
+            logWarn("I2S actual sample rate %lu Hz differs from requested %u Hz", 
+                    actualSampleRate, sampleRate_);
+            logWarn("This will cause pitch errors! Adjust synthesizer sample rate.");
+            // Update our stored sample rate to match reality
+            sampleRate_ = actualSampleRate;
+        }
+        
         // Allocate buffer (float samples)
         buffer_.resize(bufferFrames_ * channels_);
         
         // Allocate I2S buffer (32-bit integers)
         i2sBuffer_.resize(bufferFrames_ * channels_);
         
-        logInfo("I2S audio initialized: %d Hz, %d channels, %d frames/buffer",
-                sampleRate_, channels_, bufferFrames_);
+        logInfo("I2S audio initialized: %lu Hz actual, %d channels, %d frames/buffer",
+                actualSampleRate, channels_, bufferFrames_);
     }
     
     ~I2sAudioSink() {
@@ -111,27 +126,54 @@ public:
         fillCallback(buffer_.data(), bufferFrames_);
         
         // Convert float to 32-bit integer for I2S
-        // PCM5102 expects 32-bit samples in I2S format
+        // PCM5102 expects 32-bit data, MSB first
+        // Use 24-bit range to avoid overflow and provide headroom
+        const float scale = 8388608.0f;  // 2^23 for 24-bit range
+        
         for (size_t i = 0; i < bufferFrames_ * channels_; ++i) {
             // Clamp and convert float [-1.0, 1.0] to int32
             float sample = buffer_[i];
             if (sample > 1.0f) sample = 1.0f;
             if (sample < -1.0f) sample = -1.0f;
             
-            // Convert to 32-bit signed integer (full range)
-            i2sBuffer_[i] = static_cast<int32_t>(sample * 2147483647.0f);
+            // Convert to 24-bit signed integer, then shift left 8 bits
+            // This left-justifies the 24-bit data in the 32-bit word
+            int32_t sample24 = static_cast<int32_t>(sample * scale);
+            i2sBuffer_[i] = sample24 << 8;
         }
         
         // Write to I2S
         size_t bytesWritten = 0;
+        size_t bytesToWrite = bufferFrames_ * channels_ * sizeof(int32_t);
         esp_err_t err = i2s_write(i2sPort_, i2sBuffer_.data(), 
-                                  bufferFrames_ * channels_ * sizeof(int32_t),
+                                  bytesToWrite,
                                   &bytesWritten, portMAX_DELAY);
         
         if (err != ESP_OK) {
             logError("I2S write failed: %d", err);
         }
+        
+        // Detect buffer underruns
+        if (bytesWritten < bytesToWrite) {
+            partialWriteCount_++;
+            if (partialWriteCount_ % 100 == 1) {
+                logWarn("I2S partial write: %d/%d bytes (underrun #%lu)", 
+                        bytesWritten, bytesToWrite, partialWriteCount_);
+            }
+        }
+        
+        // Check DMA buffer status
+        if (bytesWritten == 0) {
+            underrunCount_++;
+            if (underrunCount_ % 10 == 1) {
+                logError("I2S complete underrun (zero bytes written) #%lu", underrunCount_);
+            }
+        }
     }
+    
+    // Get underrun statistics
+    uint32_t getUnderrunCount() const { return underrunCount_; }
+    uint32_t getPartialWriteCount() const { return partialWriteCount_; }
     
     unsigned int getSampleRate() const { return sampleRate_; }
     unsigned int getChannels() const { return channels_; }
@@ -145,6 +187,10 @@ private:
     
     std::vector<float> buffer_;      // Float buffer for synthesis
     std::vector<int32_t> i2sBuffer_; // I2S output buffer
+    
+    // Underrun detection counters
+    uint32_t underrunCount_;
+    uint32_t partialWriteCount_;
 };
 
 } // namespace esp32
