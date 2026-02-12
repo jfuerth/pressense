@@ -9,8 +9,11 @@
 #include <functional>
 #include <cmath>
 
-#ifndef PLATFORM_ESP32
-#include <program_data.hpp>
+// Feature modules (included based on platform configuration)
+#include <program_storage.hpp>
+
+#ifdef FEATURE_CLIPBOARD
+#include <preset_clipboard.hpp>
 #endif
 
 namespace platform {
@@ -25,12 +28,15 @@ class SynthApplication {
 public:
     SynthApplication(unsigned int sampleRate = 44100,
                      unsigned int channels = 2,
-                     uint8_t maxVoices = 8)
+                     uint8_t maxVoices = 8,
+                     std::unique_ptr<features::ProgramStorage> programStorage = nullptr)
         : sampleRate_(sampleRate)
         , channels_(channels)
         , maxVoices_(maxVoices)
         , outputProcessor_(0.5f, static_cast<float>(sampleRate))
-        , currentProgram_(1) {
+        , currentProgram_(1)
+        , programStorage_(std::move(programStorage))
+        {
         
         logInfo("Initializing synthesizer: %d Hz, %d voices", sampleRate_, maxVoices_);
         
@@ -41,20 +47,12 @@ public:
         
         auto voiceAllocator = std::make_unique<midi::SimpleVoiceAllocator>(maxVoices_, voiceFactory);
         
-#ifndef PLATFORM_ESP32
-        // Load program 1 or use defaults (Linux only)
-        midi::ProgramData currentProgramData;
-        if (currentProgramData.loadFromFile(currentProgram_)) {
-            currentProgramData.applyToVoices(*voiceAllocator);
-            logInfo("Loaded program %d from file", currentProgram_);
+        // Load program using provided storage implementation
+        if (programStorage_) {
+            programStorage_->loadProgram(currentProgram_, *voiceAllocator);
         } else {
-            logInfo("Program %d not found, using defaults", currentProgram_);
+            logWarn("No program storage provided; using synthesizer defaults");
         }
-#else
-        // ESP32: Apply default program settings
-        applyDefaultProgram(*voiceAllocator);
-        logInfo("Using embedded default program");
-#endif
         
         // Create MIDI processor with callbacks
         midiProcessor_ = std::make_unique<midi::StreamProcessor>(
@@ -123,6 +121,12 @@ public:
     
     midi::StreamProcessor& getMidiProcessor() { return *midiProcessor_; }
     
+#ifdef FEATURE_CLIPBOARD
+    void setClipboard(std::unique_ptr<features::PresetClipboard> clipboard) {
+        clipboard_ = std::move(clipboard);
+    }
+#endif
+
 private:
     void handleCC(uint8_t channel, uint8_t cc, uint8_t value, midi::SynthVoiceAllocator& allocator) {
         float normalized = static_cast<float>(value) / 127.0f;
@@ -205,21 +209,20 @@ private:
                             outputProcessor_.getName(), outputProcessor_.getDrive());
                 }
                 break;
-#ifndef PLATFORM_ESP32
-            case 103: // Copy to clipboard (Linux only)
-                if (normalized > 0.5f) {
-                    clipboard_.captureFromVoices(allocator);
-                    logInfo("Copied current settings to clipboard");
+#ifdef FEATURE_CLIPBOARD
+            case 103: // Copy to clipboard
+                if (normalized > 0.5f && clipboard_) {
+                    clipboard_->copy(allocator);
                 }
                 break;
-            case 104: // Paste from clipboard (Linux only)
-                if (normalized > 0.5f) {
+            case 104: // Paste from clipboard
+                if (normalized > 0.5f && clipboard_) {
                     if (currentProgram_ == 1) {
                         logError("Cannot paste into program 1 (protected)");
+                    } else if (programStorage_) {
+                        clipboard_->pasteAndSave(allocator, currentProgram_, *programStorage_);
                     } else {
-                        clipboard_.applyToVoices(allocator);
-                        clipboard_.saveToFile(currentProgram_);
-                        logInfo("Pasted clipboard to program %d", currentProgram_);
+                        clipboard_->paste(allocator);
                     }
                 }
                 break;
@@ -236,49 +239,14 @@ private:
     }
     
     void handleProgramChange(uint8_t channel, uint8_t program, midi::SynthVoiceAllocator& allocator) {
-#ifndef PLATFORM_ESP32
         currentProgram_ = program;
-        midi::ProgramData programData;
-        if (programData.loadFromFile(program)) {
-            programData.applyToVoices(allocator);
-            logInfo("Loaded program %d", program);
+        if (programStorage_) {
+            programStorage_->loadProgram(program, allocator);
         } else {
-            programData.applyToVoices(allocator);
-            logInfo("Program %d not found, using defaults", program);
+            logWarn("Program change requested but no storage available (program %d)", program);
         }
-#else
-        // ESP32: Just apply defaults (no file system)
-        applyDefaultProgram(allocator);
-        logInfo("Program change to %d (using defaults)", program);
-#endif
     }
-    
-#ifdef PLATFORM_ESP32
-    void applyDefaultProgram(midi::SynthVoiceAllocator& allocator) {
-        // Default program: Matches program_2.json
-        allocator.forEachVoice([](midi::Synth& voice) {
-            auto& ws = static_cast<synth::WavetableSynth&>(voice);
-            
-            // Waveform: Pure sawtooth
-            ws.getOscillator().updateWavetable(0.0f);
-            
-            // Filter: Low-pass mode
-            ws.getFilter().setMode(synth::BiquadFilter::Mode::LOWPASS);
-            ws.setBaseCutoff(222.0530242919922f);
-            ws.getFilter().setQ(3.9370079040527344f);
-            
-            // Filter envelope
-            ws.getFilterEnvelope().setAttackTime(0.06399212777614594f);
-            ws.getFilterEnvelope().setDecayTime(0.24622048437595367f);
-            ws.getFilterEnvelope().setSustainLevel(0.023622047156095505f);
-            ws.getFilterEnvelope().setReleaseTime(0.3249606192111969f);
-            ws.setFilterEnvelopeAmount(0.5f);
-            
-            // Note: Amplitude envelope is configured in WavetableSynth constructor
-        });
-    }
-#endif
-    
+
     unsigned int sampleRate_;
     unsigned int channels_;
     uint8_t maxVoices_;
@@ -289,8 +257,10 @@ private:
     std::unique_ptr<midi::StreamProcessor> midiProcessor_;
     std::vector<float> monoBuffer_;
     
-#ifndef PLATFORM_ESP32
-    midi::ProgramData clipboard_;  // For copy/paste (Linux only)
+    std::unique_ptr<features::ProgramStorage> programStorage_;
+
+#ifdef FEATURE_CLIPBOARD
+    std::unique_ptr<features::PresetClipboard> clipboard_;
 #endif
 };
 

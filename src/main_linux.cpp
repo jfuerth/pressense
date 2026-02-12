@@ -5,6 +5,13 @@
 #include <csignal>
 #include <atomic>
 
+// Feature modules (available on Linux)
+#include <filesystem_program_storage.hpp>
+
+#ifdef FEATURE_CLIPBOARD
+#include <preset_clipboard.hpp>
+#endif
+
 std::atomic<bool> running(true);
 
 void signalHandler(int signum) {
@@ -67,8 +74,13 @@ int app_main(const char* midiDevice) {
                audioSink.getChannels(), 
                audioSink.getBufferFrames());
         
-        // Create synthesizer application
-        platform::SynthApplication synth(SAMPLE_RATE, CHANNELS, MAX_VOICES);
+        // Create synthesizer application with features
+        auto programStorage = std::make_unique<features::FilesystemProgramStorage>();
+        platform::SynthApplication synth(SAMPLE_RATE, CHANNELS, MAX_VOICES, std::move(programStorage));
+
+#ifdef FEATURE_CLIPBOARD
+        synth.setClipboard(std::make_unique<features::PresetClipboard>());
+#endif
         
         // Main audio loop
         logInfo("\nStarting audio/MIDI processing (Ctrl+C to stop)...");

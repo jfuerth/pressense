@@ -5,23 +5,20 @@
 #include <sawtooth_synth.hpp>
 #include <synth_voice_allocator.hpp>
 #include <cstdint>
-
-#ifndef PLATFORM_ESP32
-#include <json.hpp>  // nlohmann/json single-header (Linux only)
-#include <fstream>
-#include <sys/stat.h>
-#include <errno.h>
-#endif
-
-#include <cstdio>
+#include <json.hpp>  // nlohmann/json single-header
 
 namespace midi {
 
 /**
- * @brief Program data structure for saving/loading synth presets
+ * @brief Program data structure for synth presets
  * 
- * Uses nlohmann/json for automatic serialization/deserialization.
- * Add new parameters as struct members and to NLOHMANN_DEFINE_TYPE_INTRUSIVE macro.
+ * Serialization to/from JSON is defined via free functions.
+ * Storage implementations (elsewhere) handle actual file/memory operations.
+ * 
+ * When adding new parameters:
+ * 1. Add member variable with default value
+ * 2. Add to to_json() function
+ * 3. Add to from_json() function with .value() for backward compatibility
  */
 struct ProgramData {
     // Oscillator
@@ -39,107 +36,12 @@ struct ProgramData {
     float filterEnvSustain = 0.3f;
     float filterEnvRelease = 0.1f;
     
-#ifndef PLATFORM_ESP32
     /**
-     * @brief Save program data to JSON file (Linux only)
-     * @param programNumber Program number (0-127)
-     * @param bankNumber Bank number (default 0)
-     * @return true if successful
-     */
-    bool saveToFile(uint8_t programNumber, uint8_t bankNumber = 0) const {
-        char dirPath[200];
-        snprintf(dirPath, sizeof(dirPath), "patches/bank_%d", bankNumber);
-        
-        // Create directories if they don't exist
-        if (mkdir("patches", 0755) == -1 && errno != EEXIST) {
-            std::perror("Failed to create patches directory");
-            return false;
-        }
-        if (mkdir(dirPath, 0755) == -1 && errno != EEXIST) {
-            std::perror("Failed to create bank directory");
-            return false;
-        }
-        
-        char filePath[256];
-        snprintf(filePath, sizeof(filePath), "%s/program_%d.json", dirPath, programNumber);
-        
-        try {
-            nlohmann::json j = *this;  // Automatic conversion
-            std::ofstream file(filePath);
-            if (!file.is_open()) {
-                std::perror("Failed to open file for writing");
-                return false;
-            }
-            file << j.dump(2);  // Pretty print with 2-space indent
-            file.close();
-            std::printf("Saved program %d to %s\n", programNumber, filePath);
-            return true;
-        } catch (const std::exception& e) {
-            std::fprintf(stderr, "Error saving program: %s\n", e.what());
-            return false;
-        }
-    }
-    
-    /**
-     * @brief Load program data from JSON file (Linux only)
-     * @param programNumber Program number (0-127)
-     * @param bankNumber Bank number (default 0)
-     * @return true if successful (file exists and was parsed)
-     */
-    bool loadFromFile(uint8_t programNumber, uint8_t bankNumber = 0) {
-        char filePath[256];
-        snprintf(filePath, sizeof(filePath), "patches/bank_%d/program_%d.json", 
-                 bankNumber, programNumber);
-        
-        try {
-            std::ifstream file(filePath);
-            if (!file.is_open()) {
-                return false;  // File doesn't exist - use defaults
-            }
-            
-            nlohmann::json j;
-            file >> j;
-            *this = j.get<ProgramData>();  // Automatic conversion
-            
-            std::printf("Loaded program %d from %s\n", programNumber, filePath);
-            return true;
-        } catch (const std::exception& e) {
-            std::fprintf(stderr, "Error loading program %d: %s\n", programNumber, e.what());
-            return false;
-        }
-    }
-#endif // PLATFORM_ESP32
-    
-    /**
-     * @brief Apply program data to all voices
-     * @param allocator Voice allocator containing synth voices
-     */
-    void applyToVoices(SynthVoiceAllocator& allocator) const {
-        std::printf("Applying: wave=%.3f cutoff=%.1f Q=%.3f mode=%d envAmt=%.3f\n",
-            waveformShape, baseCutoff, filterQ, filterMode, filterEnvAmount);
-        
-        allocator.forEachVoice([this](Synth& voice) {
-            auto& ws = static_cast<synth::WavetableSynth&>(voice);
-            ws.getOscillator().updateWavetable(waveformShape);
-            ws.setBaseCutoff(baseCutoff);
-            ws.getFilter().setQ(filterQ);
-            ws.getFilter().setMode(static_cast<synth::BiquadFilter::Mode>(filterMode));
-            ws.setFilterEnvelopeAmount(filterEnvAmount);
-            ws.getFilterEnvelope().setAttackTime(filterEnvAttack);
-            ws.getFilterEnvelope().setDecayTime(filterEnvDecay);
-            ws.getFilterEnvelope().setSustainLevel(filterEnvSustain);
-            ws.getFilterEnvelope().setReleaseTime(filterEnvRelease);
-        });
-    }
-    
-    /**
-     * @brief Capture current settings from voices
-     * @param allocator Voice allocator containing synth voices
+     * @brief Capture current synth settings from voice allocator
      */
     void captureFromVoices(SynthVoiceAllocator& allocator) {
-        // Sample parameters from first voice
         bool captured = false;
-        allocator.forEachVoice([this, &captured](Synth& voice) {
+        allocator.forEachVoice([&](Synth& voice) {
             if (!captured) {
                 auto& ws = static_cast<synth::WavetableSynth&>(voice);
                 waveformShape = ws.getOscillator().getShape();
@@ -155,22 +57,60 @@ struct ProgramData {
             }
         });
     }
-    
-#ifndef PLATFORM_ESP32
-    // Define JSON serialization using nlohmann macro (must be in same namespace)
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(ProgramData,
-        waveformShape,
-        baseCutoff,
-        filterQ,
-        filterMode,
-        filterEnvAmount,
-        filterEnvAttack,
-        filterEnvDecay,
-        filterEnvSustain,
-        filterEnvRelease
-    )
-#endif
 };
+
+/**
+ * @brief Apply program data to all voices in allocator
+ */
+inline void applyProgramToVoices(const ProgramData& program, SynthVoiceAllocator& allocator) {
+    allocator.forEachVoice([&program](Synth& voice) {
+        auto& ws = static_cast<synth::WavetableSynth&>(voice);
+        
+        // Apply oscillator settings
+        ws.getOscillator().updateWavetable(program.waveformShape);
+        
+        // Apply filter settings
+        ws.setBaseCutoff(program.baseCutoff);
+        ws.getFilter().setQ(program.filterQ);
+        ws.getFilter().setMode(static_cast<synth::BiquadFilter::Mode>(program.filterMode));
+        
+        // Apply filter envelope settings
+        ws.setFilterEnvelopeAmount(program.filterEnvAmount);
+        ws.getFilterEnvelope().setAttackTime(program.filterEnvAttack);
+        ws.getFilterEnvelope().setDecayTime(program.filterEnvDecay);
+        ws.getFilterEnvelope().setSustainLevel(program.filterEnvSustain);
+        ws.getFilterEnvelope().setReleaseTime(program.filterEnvRelease);
+    });
+}
+
+// JSON serialization functions (must be in same namespace as ProgramData)
+inline void to_json(nlohmann::json& j, const ProgramData& p) {
+    j = nlohmann::json{
+        {"waveformShape", p.waveformShape},
+        {"baseCutoff", p.baseCutoff},
+        {"filterQ", p.filterQ},
+        {"filterMode", p.filterMode},
+        {"filterEnvAmount", p.filterEnvAmount},
+        {"filterEnvAttack", p.filterEnvAttack},
+        {"filterEnvDecay", p.filterEnvDecay},
+        {"filterEnvSustain", p.filterEnvSustain},
+        {"filterEnvRelease", p.filterEnvRelease}
+    };
+}
+
+inline void from_json(const nlohmann::json& j, ProgramData& p) {
+    // Use value() with defaults for backward compatibility
+    // If a field is missing in the JSON, the default value is used
+    p.waveformShape = j.value("waveformShape", 0.0f);
+    p.baseCutoff = j.value("baseCutoff", 1000.0f);
+    p.filterQ = j.value("filterQ", 0.707f);
+    p.filterMode = j.value("filterMode", 0);
+    p.filterEnvAmount = j.value("filterEnvAmount", 0.5f);
+    p.filterEnvAttack = j.value("filterEnvAttack", 0.005f);
+    p.filterEnvDecay = j.value("filterEnvDecay", 0.2f);
+    p.filterEnvSustain = j.value("filterEnvSustain", 0.3f);
+    p.filterEnvRelease = j.value("filterEnvRelease", 0.1f);
+}
 
 } // namespace midi
 

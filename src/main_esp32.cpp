@@ -7,6 +7,9 @@
 #include <esp_timer.h>
 #include <memory>
 
+// Feature modules (available on ESP32)
+#include <embedded_program_storage.hpp>
+
 // Global synth application instance
 static std::unique_ptr<platform::SynthApplication> gSynth;
 static std::unique_ptr<esp32::ArpeggioTask> gArpeggio;
@@ -34,7 +37,8 @@ extern "C" void app_main(void) {
     
     // Create synthesizer application with the ACTUAL sample rate
     logInfo("Initializing synthesizer...");
-    gSynth = std::make_unique<platform::SynthApplication>(actualSampleRate, CHANNELS, MAX_VOICES);
+    auto programStorage = std::make_unique<features::EmbeddedProgramStorage>();
+    gSynth = std::make_unique<platform::SynthApplication>(actualSampleRate, CHANNELS, MAX_VOICES, std::move(programStorage));
         
     // Start arpeggio task for testing
     logInfo("Starting arpeggio task...");
