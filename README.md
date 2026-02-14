@@ -8,8 +8,19 @@ There are also platform-dependent modules that arrange to receive MIDI streams,
 pipe them through the stream processor into one or more synths, and then out
 to a PCM audio sink.
 
-* *lib/linux*: ALSA-based MIDI input and audio sink
-* *lib/esp*: ESP32 MIDI input and audio sink (various DAC peripherals)
+**Interface code**
+* *lib/common*: Type definitions  ???
+Probably want to separate concrete common types vs. interfaces that need to be implemented by hardware platforms (linux, mac, esp32, rp2040, rp2350)
+
+**Implementaion code**
+* *lib/synth*: Platform-independent polyphonic subtractive synthesizer.
+* *lib/midi*: Platform-independent MIDI processor. Drives the synth voices.
+* *lib/linux*: Linux-specific implementations of the generic interfaces (ALSA-based MIDI input and audio sink).
+* *lib/esp*: ESP32-specific implementations of the generic interfaces (audio sink, preset storage, capacitive key scanning).
+* *lib/nlohmann*: Third-party JSON input and output library (for storing synth presets).
+
+**Entry points**
+* *src/*: Main methods for desktop and embedded
 
 Example hookup on a Linux build (arrows indicate direction of API calls):
 

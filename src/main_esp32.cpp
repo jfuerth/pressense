@@ -1,5 +1,6 @@
 #include <esp32_audio_sink.hpp>
-#include <esp32_arpeggio_task.hpp>
+#include <esp32_capacitive_scanner.hpp>
+#include <midi_keyboard_controller.hpp>
 #include <synth_application.hpp>
 #include <log.hpp>
 #include <freertos/FreeRTOS.h>
@@ -10,9 +11,10 @@
 // Feature modules (available on ESP32)
 #include <embedded_program_storage.hpp>
 
-// Global synth application instance
+// Global instances
 static std::unique_ptr<platform::SynthApplication> gSynth;
-static std::unique_ptr<esp32::ArpeggioTask> gArpeggio;
+static std::unique_ptr<esp32::ESP32CapacitiveScanner> gScanner;
+static std::unique_ptr<midi::MidiKeyboardController> gKeyboard;
 
 extern "C" void app_main(void) {
     logInfo("Pressence Synthesizer - ESP32");
@@ -40,15 +42,20 @@ extern "C" void app_main(void) {
     auto programStorage = std::make_unique<features::EmbeddedProgramStorage>();
     gSynth = std::make_unique<platform::SynthApplication>(actualSampleRate, CHANNELS, MAX_VOICES, std::move(programStorage));
         
-    // Start arpeggio task for testing
-    logInfo("Starting arpeggio task...");
-    gArpeggio = std::make_unique<esp32::ArpeggioTask>(
+    // Start capacitive touch keyboard
+    logInfo("Starting capacitive keyboard scanner...");
+    gScanner = std::make_unique<esp32::ESP32CapacitiveScanner>();
+    
+    logInfo("Initializing MIDI keyboard controller...");
+    gKeyboard = std::make_unique<midi::MidiKeyboardController>(
+        *gScanner,
         [](uint8_t byte) {
             if (gSynth) {
                 gSynth->processMidiByte(byte);
             }
         },
-        200  // milliseconds per note
+        60,  // Base note: C4
+        20   // Fixed velocity
     );
     
     logInfo("\nAudio/MIDI processing started!");
@@ -61,6 +68,9 @@ extern "C" void app_main(void) {
     // Main audio loop
     while (true) {
         uint32_t startTime = esp_timer_get_time();  // microseconds
+        
+        // Process keyboard scan (called from main loop, scanner runs in separate task)
+        gKeyboard->processScan();
         
         // Fill and write audio buffer
         audioSink.write([&](float* buffer, unsigned int numFrames) {
