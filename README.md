@@ -80,6 +80,21 @@ pio run -e native
 .pio/build/native/program
 ```
 
+Running the program without arguments will present a list of hardware MIDI devices. Plug in a USB MIDI device
+or pair a BLE MIDI device, and it should appear in the list.
+
+To use a virtual keyboard:
+
+* `sudo modprobe snd_virmidi`
+  * To view the list of virtual MIDI devices:
+    * Command line: `aconnect -i`
+    * GUI: `qpwgraph` (requires PipeWire with ALSA bridge, on by default on Ubuntu)
+* Run `vmpk` (Virtual MIDI Piano Keyboard)
+  * Edit → MIDI Connections
+    * MIDI Out Driver: ALSA
+    * Output MIDI Connection: Virtual Raw MIDI 2-0
+* `.pio/build/native/program hw:2,0,0`
+
 ### ESP32 DEVKITV1
 
 ```bash
