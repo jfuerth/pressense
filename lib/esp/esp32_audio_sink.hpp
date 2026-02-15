@@ -1,7 +1,5 @@
 #pragma once
 
-#ifdef PLATFORM_ESP32
-
 #include <driver/i2s.h>
 #include <vector>
 #include <stdexcept>
@@ -194,5 +192,3 @@ private:
 };
 
 } // namespace esp32
-
-#endif // PLATFORM_ESP32

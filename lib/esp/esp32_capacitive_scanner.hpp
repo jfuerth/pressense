@@ -1,7 +1,5 @@
 #pragma once
 
-#ifdef PLATFORM_ESP32
-
 #include <key_scanner.hpp>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -177,5 +175,3 @@ private:
 };
 
 } // namespace esp32
-
-#endif // PLATFORM_ESP32

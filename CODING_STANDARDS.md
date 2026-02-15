@@ -2,7 +2,7 @@
 
 ## Platform Abstraction
 
-This project is designed to run on multiple platforms (Linux, ESP32, etc.) with minimal code duplication. Follow these guidelines to maintain clean platform abstraction:
+This project is designed to run on multiple platforms (Linux, ESP32, RP2350, etc.) with minimal code duplication. Follow these guidelines to maintain clean platform abstraction:
 
 ### 1. Avoid Platform-Specific Preprocessor Directives
 

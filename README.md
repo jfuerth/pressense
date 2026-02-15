@@ -1,26 +1,50 @@
 # Pressence Embedded MIDI Synthesizer
 
-This codebase contains platform-independent code for the following:
+Pressence is a multi-platform software synthesizer with an emphasis on continuous
+pressure sensing (aka MIDI polyphonic aftertouch).
 
-* *lib/midi*: MIDI stream decoder which drives a `Synth` implementation
+High-level architecture, from input side to output side:
 
-There are also platform-dependent modules that arrange to receive MIDI streams,
-pipe them through the stream processor into one or more synths, and then out
-to a PCM audio sink.
+* Optional hardware key scanning
+  * → Outputs MIDI messages (note on, continuous note pressure, note off)
+* MIDI out (from key scanner) and in (to MIDI state machine) is possible at this layer
+  * For example, the Linux build doesn't include a key scanner, but it feeds ALSA MIDI to the synth
+  * Similarly, a low-power microcontroller could scan keys and transmit MIDI, omitting synthesis entirely
+* MIDI parser/state machine with pluggable note-to-voice allocation algorithms
+  * → Interfaces with the synth voice allocator; triggers and releases notes
+* Synthesizer abstraction & toolkit
+  * Currently one implementation: subtractive synthesizer with morphable Sawtooth/Triangle/Square waveforms
+  * Reusable biquad filter, composable with envelope generator
+  * Reusable ADSR envelope generator
+  * Voice mixing with various clipping/distortion algorithms
+  * There's room to implement other types of synth engines without worrying about note-to-voice allocation, mixdown, etc.
+* Audio output
+  * The ESP32 implementation drives an external DAC via I2S
+  * The Linux implementation outputs to ALSA (probably should update to Pipewire or JACK)
 
-**Interface code**
-* *lib/common*: Type definitions  ???
-Probably want to separate concrete common types vs. interfaces that need to be implemented by hardware platforms (linux, mac, esp32, rp2040, rp2350)
+## Code organization
 
-**Implementaion code**
+(See also: [CODING_STANDARDS.md] for more detailed rules about use of macros, error handling, and so on.)
+
+Each file fits into one of three broad categories:
+
+1. Platform-Independent code - compiles and runs on any system (desktop, microcontroller, Linux, Mac, etc.)
+2. Abstractions/Interface Definitions - defines behaviour that must be implemented using hardware- or OS-specific code
+3. Non-portable Code - implements the abstractions so the platform-neutral code can make noise!
+
+**Interface Definitions**
+* *lib/features*: Type definitions  ???
+* *lib/platform*: ??
+
+**Platform-Independent Implementaion code**
 * *lib/synth*: Platform-independent polyphonic subtractive synthesizer.
 * *lib/midi*: Platform-independent MIDI processor. Drives the synth voices.
-* *lib/linux*: Linux-specific implementations of the generic interfaces (ALSA-based MIDI input and audio sink).
-* *lib/esp*: ESP32-specific implementations of the generic interfaces (audio sink, preset storage, capacitive key scanning).
 * *lib/nlohmann*: Third-party JSON input and output library (for storing synth presets).
 
-**Entry points**
-* *src/*: Main methods for desktop and embedded
+**Platform-Specific Implementaion code**
+* *lib/linux*: Linux-specific implementations of the generic interfaces (ALSA-based MIDI input and audio sink).
+* *lib/esp*: ESP32-specific implementations of the generic interfaces (audio sink, preset storage, capacitive key scanning).
+* *src/*: Main entry points. One per target OS/platform.
 
 Example hookup on a Linux build (arrows indicate direction of API calls):
 

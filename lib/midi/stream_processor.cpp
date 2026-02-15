@@ -89,16 +89,6 @@ void StreamProcessor::process(const uint8_t data)
             } else {
                 float frequencyHz = 440.0f * std::pow(2.0f, (note - 69) / 12.0f);
                 float volume = static_cast<float>(velocity) / 127.0f;
-                
-                #ifdef PLATFORM_ESP32
-                // Debug: log first few note triggers to verify frequency calculation
-                static int noteCount = 0;
-                if (noteCount < 8) {
-                    printf("Note %d -> %.2f Hz\n", note, frequencyHz);
-                    noteCount++;
-                }
-                #endif
-                
                 voice.trigger(frequencyHz, volume);
             }
 
