@@ -5,7 +5,7 @@
 #include <csignal>
 #include <atomic>
 
-// Feature modules (available on Linux)
+// Platform-specific implementations
 #include <filesystem_program_storage.hpp>
 
 #ifdef FEATURE_CLIPBOARD
@@ -74,12 +74,12 @@ int app_main(const char* midiDevice) {
                audioSink.getChannels(), 
                audioSink.getBufferFrames());
         
-        // Create synthesizer application with features
-        auto programStorage = std::make_unique<features::FilesystemProgramStorage>();
+        // Create synthesizer application with platform implementations
+        auto programStorage = std::make_unique<linux::FilesystemProgramStorage>();
         platform::SynthApplication synth(SAMPLE_RATE, CHANNELS, MAX_VOICES, std::move(programStorage));
 
 #ifdef FEATURE_CLIPBOARD
-        synth.setClipboard(std::make_unique<features::PresetClipboard>());
+        synth.setClipboard(std::make_unique<linux::PresetClipboard>());
 #endif
         
         // Main audio loop

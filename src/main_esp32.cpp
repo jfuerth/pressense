@@ -8,7 +8,7 @@
 #include <esp_timer.h>
 #include <memory>
 
-// Feature modules (available on ESP32)
+// Platform-specific implementations
 #include <embedded_program_storage.hpp>
 
 // Global instances
@@ -39,7 +39,7 @@ extern "C" void app_main(void) {
     
     // Create synthesizer application with the ACTUAL sample rate
     logInfo("Initializing synthesizer...");
-    auto programStorage = std::make_unique<features::EmbeddedProgramStorage>();
+    auto programStorage = std::make_unique<esp32::EmbeddedProgramStorage>();
     gSynth = std::make_unique<platform::SynthApplication>(actualSampleRate, CHANNELS, MAX_VOICES, std::move(programStorage));
         
     // Start capacitive touch keyboard

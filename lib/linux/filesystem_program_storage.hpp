@@ -8,7 +8,7 @@
 #include <errno.h>
 #include <cstdio>
 
-namespace features {
+namespace linux {
 
 /**
  * @brief Filesystem-based program storage implementation
@@ -16,7 +16,7 @@ namespace features {
  * Stores programs as JSON files in the patches/ directory.
  * Only available on platforms with filesystem support.
  */
-class FilesystemProgramStorage : public ProgramStorage {
+class FilesystemProgramStorage : public features::ProgramStorage {
 public:
     FilesystemProgramStorage(const char* basePath = "patches")
         : basePath_(basePath) {}
@@ -104,4 +104,4 @@ private:
     }
 };
 
-} // namespace features
+} // namespace linux

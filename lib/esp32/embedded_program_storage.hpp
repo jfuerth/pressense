@@ -6,7 +6,7 @@
 #include <program_data.hpp>
 #include <log.hpp>
 
-namespace features {
+namespace esp32 {
 
 /**
  * @brief Embedded program storage for platforms without filesystem
@@ -14,7 +14,7 @@ namespace features {
  * Provides a single hardcoded default program.
  * Used on embedded platforms like ESP32.
  */
-class EmbeddedProgramStorage : public ProgramStorage {
+class EmbeddedProgramStorage : public features::ProgramStorage {
 public:
     EmbeddedProgramStorage() = default;
     
@@ -49,4 +49,4 @@ private:
     }
 };
 
-} // namespace features
+} // namespace esp32

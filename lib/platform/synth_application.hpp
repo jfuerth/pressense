@@ -9,11 +9,11 @@
 #include <functional>
 #include <cmath>
 
-// Feature modules (included based on platform configuration)
+// Feature interfaces
 #include <program_storage.hpp>
 
 #ifdef FEATURE_CLIPBOARD
-#include <preset_clipboard.hpp>
+#include <clipboard.hpp>
 #endif
 
 namespace platform {
@@ -122,7 +122,7 @@ public:
     midi::StreamProcessor& getMidiProcessor() { return *midiProcessor_; }
     
 #ifdef FEATURE_CLIPBOARD
-    void setClipboard(std::unique_ptr<features::PresetClipboard> clipboard) {
+    void setClipboard(std::unique_ptr<features::Clipboard> clipboard) {
         clipboard_ = std::move(clipboard);
     }
 #endif
@@ -260,7 +260,7 @@ private:
     std::unique_ptr<features::ProgramStorage> programStorage_;
 
 #ifdef FEATURE_CLIPBOARD
-    std::unique_ptr<features::PresetClipboard> clipboard_;
+    std::unique_ptr<features::Clipboard> clipboard_;
 #endif
 };
 

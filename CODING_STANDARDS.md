@@ -27,16 +27,18 @@ When functionality differs significantly between platforms, create platform-spec
 **Directory Structure:**
 ```
 lib/
-├── features/           # Feature interfaces and implementations
+├── features/           # Abstract interfaces only
 │   ├── program_storage.hpp           # Interface
-│   ├── filesystem_program_storage.hpp # Linux implementation
-│   └── embedded_program_storage.hpp   # ESP32 implementation
-├── linux/             # Linux-only implementations
+│   └── clipboard.hpp                 # Interface
+├── linux/             # All Linux implementations
 │   ├── alsa_midi_in.hpp
-│   └── linux_audio_sink.hpp
-├── esp/               # ESP32-only implementations
-│   ├── esp32_midi_in.hpp
-│   └── esp32_audio_sink.hpp
+│   ├── alsa_audio_sink.hpp
+│   ├── filesystem_program_storage.hpp  # Implements features::ProgramStorage
+│   └── preset_clipboard.hpp            # Implements features::Clipboard
+├── esp32/             # All ESP32 implementations
+│   ├── i2s_audio_sink.hpp
+│   ├── capacitive_scanner.hpp
+│   └── embedded_program_storage.hpp    # Implements features::ProgramStorage
 └── platform/          # Platform-agnostic code
     └── synth_application.hpp
 ```
@@ -46,6 +48,10 @@ lib/
 - Easier to test and maintain
 - Clear separation of concerns
 - Compiler only sees relevant code
+- Platform variants are naturally grouped together
+- Adding new platforms is straightforward
+
+**Key principle:** Interfaces live in `lib/features/`, implementations live in `lib/<platform>/`. This makes it clear what each platform provides and easy to add new platforms without scattering code across the codebase.
 
 ### 3. Use Feature Flags for Optional Functionality
 
@@ -88,13 +94,13 @@ public:
 };
 ```
 
-**Implementations (platform-specific):**
+**Implementations (in platform directories):**
 ```cpp
-// lib/features/filesystem_program_storage.hpp - for Linux
-class FilesystemProgramStorage : public ProgramStorage { ... };
+// lib/linux/filesystem_program_storage.hpp
+class FilesystemProgramStorage : public features::ProgramStorage { ... };
 
-// lib/features/embedded_program_storage.hpp - for ESP32
-class EmbeddedProgramStorage : public ProgramStorage { ... };
+// lib/esp32/embedded_program_storage.hpp
+class EmbeddedProgramStorage : public features::ProgramStorage { ... };
 ```
 
 **Usage in main files (no feature flags needed):**
@@ -102,13 +108,13 @@ class EmbeddedProgramStorage : public ProgramStorage { ... };
 // src/main_linux.cpp
 #include <filesystem_program_storage.hpp>
 
-auto storage = std::make_unique<features::FilesystemProgramStorage>();
+auto storage = std::make_unique<linux::FilesystemProgramStorage>();
 SynthApplication synth(sampleRate, channels, voices, std::move(storage));
 
 // src/main_esp32.cpp
 #include <embedded_program_storage.hpp>
 
-auto storage = std::make_unique<features::EmbeddedProgramStorage>();
+auto storage = std::make_unique<esp32::EmbeddedProgramStorage>();
 SynthApplication synth(sampleRate, channels, voices, std::move(storage));
 ```
 
@@ -129,7 +135,7 @@ Use feature flags for optional functionality:
 // src/main_linux.cpp
 #ifdef FEATURE_CLIPBOARD
 #include <preset_clipboard.hpp>
-synth.setClipboard(std::make_unique<features::PresetClipboard>());
+synth.setClipboard(std::make_unique<linux::PresetClipboard>());
 #endif
 
 // Application code
@@ -191,11 +197,11 @@ To add a new optional feature (e.g., USB MIDI):
 
 2. **Create platform implementations:**
    ```cpp
-   // lib/features/linux_usb_midi.hpp
-   class LinuxUsbMidi : public UsbMidiInterface { ... };
+   // lib/linux/usb_midi.hpp
+   class LinuxUsbMidi : public features::UsbMidiInterface { ... };
    
-   // lib/features/esp32_usb_midi.hpp
-   class Esp32UsbMidi : public UsbMidiInterface { ... };
+   // lib/esp32/usb_midi.hpp
+   class Esp32UsbMidi : public features::UsbMidiInterface { ... };
    ```
 
 3. **Define feature flag in platformio.ini:**
@@ -212,13 +218,8 @@ To add a new optional feature (e.g., USB MIDI):
    #ifdef FEATURE_USB_MIDI
    #include <usb_midi.hpp>
    
-   // Inject implementation
-   std::unique_ptr<UsbMidiInterface> usbMidi;
-   #ifdef PLATFORM_ESP32
-   usbMidi = std::make_unique<Esp32UsbMidi>();
-   #else
-   usbMidi = std::make_unique<LinuxUsbMidi>();
-   #endif
+   // Inject platform-specific implementation
+   auto usbMidi = std::make_unique<linux::UsbMidi>();  // or esp32::UsbMidi
    #endif
    ```
 
@@ -235,4 +236,16 @@ To add a new optional feature (e.g., USB MIDI):
 - Features, not platforms
 - Interfaces, not `#ifdef`
 - Dependency injection over conditional compilation
+- Group by platform, not by feature
+
+**Where to Put New Code:**
+
+- **Platform-independent DSP/synthesis algorithms** → `lib/synth/`
+- **Platform-independent MIDI handling** → `lib/midi/`
+- **Platform-agnostic application logic** → `lib/platform/`
+- **Abstract feature interfaces** → `lib/features/`
+- **Linux-specific implementations** → `lib/linux/`
+- **ESP32-specific implementations** → `lib/esp32/`
+- **New platform implementations** → Create `lib/<platform_name>/`
+- **Entry points** → `src/main_<platform>.cpp`
 - Let the build system exclude platform-specific code, not preprocessor

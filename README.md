@@ -11,6 +11,9 @@ High-level architecture, from input side to output side:
   * For example, the Linux build doesn't include a key scanner, but it feeds ALSA MIDI to the synth
   * Similarly, a low-power microcontroller could scan keys and transmit MIDI, omitting synthesis entirely
 * MIDI parser/state machine with pluggable note-to-voice allocation algorithms
+  * Can be fed programmatically from any source
+    * Current: the capacitive key scanner
+    * Future ideas: UART MIDI, USB MIDI, sequencer
   * → Interfaces with the synth voice allocator; triggers and releases notes
 * Synthesizer abstraction & toolkit
   * Currently one implementation: subtractive synthesizer with morphable Sawtooth/Triangle/Square waveforms
@@ -18,9 +21,11 @@ High-level architecture, from input side to output side:
   * Reusable ADSR envelope generator
   * Voice mixing with various clipping/distortion algorithms
   * There's room to implement other types of synth engines without worrying about note-to-voice allocation, mixdown, etc.
+  * Future idea: could implement a tracker module that ignores the voice allocator and drives voices directly (one voice per track)
 * Audio output
   * The ESP32 implementation drives an external DAC via I2S
-  * The Linux implementation outputs to ALSA (probably should update to Pipewire or JACK)
+  * The Linux implementation outputs to ALSA (useful for embedded Linux projects)
+  * Future: probably should include an option for Pipewire or JACK
 
 ## Code organization
 
@@ -28,22 +33,24 @@ High-level architecture, from input side to output side:
 
 Each file fits into one of three broad categories:
 
-1. Platform-Independent code - compiles and runs on any system (desktop, microcontroller, Linux, Mac, etc.)
-2. Abstractions/Interface Definitions - defines behaviour that must be implemented using hardware- or OS-specific code
+1. Abstractions/Interface Definitions - defines behaviour that must be implemented using hardware- or OS-specific code
+2. Platform-Independent code - compiles and runs on any system (desktop, microcontroller, Linux, Mac, etc.)
 3. Non-portable Code - implements the abstractions so the platform-neutral code can make noise!
 
-**Interface Definitions**
-* *lib/features*: Type definitions  ???
-* *lib/platform*: ??
+Higher-numbered items can depend on lower-numbered items, but not vice-versa.
 
-**Platform-Independent Implementaion code**
-* *lib/synth*: Platform-independent polyphonic subtractive synthesizer.
+**Abstract Interfaces**
+* *lib/features*: Abstract interfaces for platform-specific features (program storage, clipboard).
+* *lib/platform*: Platform-agnostic application logic that uses dependency injection for platform-specific implementations.
+
+**Platform-Independent Implementation Code**
+* *lib/synth*: Platform-independent polyphonic subtractive synthesizer (DSP algorithms).
 * *lib/midi*: Platform-independent MIDI processor. Drives the synth voices.
 * *lib/nlohmann*: Third-party JSON input and output library (for storing synth presets).
 
-**Platform-Specific Implementaion code**
-* *lib/linux*: Linux-specific implementations of the generic interfaces (ALSA-based MIDI input and audio sink).
-* *lib/esp*: ESP32-specific implementations of the generic interfaces (audio sink, preset storage, capacitive key scanning).
+**Platform-Specific Implementation Code**
+* *lib/linux*: Linux implementations (ALSA MIDI/audio, filesystem program storage, preset clipboard).
+* *lib/esp32*: ESP32 implementations (I2S audio sink, embedded program storage, capacitive key scanning).
 * *src/*: Main entry points. One per target OS/platform.
 
 Example hookup on a Linux build (arrows indicate direction of API calls):

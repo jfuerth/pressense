@@ -7,7 +7,8 @@ set(app_sources "main_esp32.cpp")
 # Include paths for platform-specific libraries
 set(include_dirs 
     "${CMAKE_SOURCE_DIR}/lib/platform"
-    "${CMAKE_SOURCE_DIR}/lib/esp"
+    "${CMAKE_SOURCE_DIR}/lib/esp32"
+    "${CMAKE_SOURCE_DIR}/lib/features"
     "${CMAKE_SOURCE_DIR}/lib/midi"
     "${CMAKE_SOURCE_DIR}/lib/synth"
 )
