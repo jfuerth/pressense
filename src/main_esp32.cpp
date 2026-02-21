@@ -1,5 +1,6 @@
 #include <esp32_audio_sink.hpp>
 #include <esp32_capacitive_scanner.hpp>
+#include <esp32_telemetry_sink.hpp>
 #include <midi_keyboard_controller.hpp>
 #include <synth_application.hpp>
 #include <log.hpp>
@@ -47,6 +48,7 @@ extern "C" void app_main(void) {
     gScanner = std::make_unique<esp32::ESP32CapacitiveScanner>();
     
     logInfo("Initializing MIDI keyboard controller...");
+    auto telemetrySink = std::make_unique<esp32::Esp32TelemetrySink>();
     gKeyboard = std::make_unique<midi::MidiKeyboardController>(
         *gScanner,
         [](uint8_t byte) {
@@ -54,9 +56,13 @@ extern "C" void app_main(void) {
                 gSynth->processMidiByte(byte);
             }
         },
+        std::move(telemetrySink),
         60,  // Base note: C4
         20   // Fixed velocity
     );
+    
+    // Enable telemetry output
+    gKeyboard->setTelemetryEnabled(true);
     
     logInfo("\nAudio/MIDI processing started!");
     
