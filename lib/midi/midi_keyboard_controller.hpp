@@ -48,11 +48,13 @@ struct KeyScanStats {
  */
 class MidiKeyboardController {
 public:
-    static constexpr uint8_t CALIBRATION_SCANS = 100;
-    static constexpr float NOTE_ON_THRESHOLD = 1.20f;   // 20% above baseline
-    static constexpr float NOTE_OFF_THRESHOLD = 1.10f;  // 10% above baseline (hysteresis)
+    static constexpr uint16_t CALIBRATION_SCANS = 1000;
+    static constexpr float NOTE_ON_THRESHOLD = 2.0f;    // Ratio above baseline for note on
+    static constexpr float NOTE_OFF_THRESHOLD = 1.5f;   // Ratio above baseline for note off (hysteresis)
+    static constexpr float MAX_PRESSURE_RATIO = 40.0f;   // Ratio for maximum aftertouch pressure
     static constexpr float BASELINE_ALPHA = 0.001f;     // Exponential moving average factor
     static constexpr uint8_t AFTERTOUCH_DEADBAND = 2;   // Suppress small changes
+    static constexpr float MIN_BASELINE = 1.0f;         // Minimum baseline to prevent ratio issues
     
     /**
      * @brief Construct MIDI keyboard controller
@@ -107,9 +109,10 @@ public:
             calibrationCount_++;
             
             if (calibrationCount_ >= CALIBRATION_SCANS) {
-                // Finalize calibration
+                // Finalize calibration with minimum baseline enforcement
                 for (uint8_t i = 0; i < keyCount; i++) {
-                    baselines_[i] = static_cast<float>(calibrationSums_[i]) / CALIBRATION_SCANS;
+                    float avgBaseline = static_cast<float>(calibrationSums_[i]) / CALIBRATION_SCANS;
+                    baselines_[i] = std::max(avgBaseline, MIN_BASELINE);
                 }
                 isCalibrated_ = true;
                 logInfo("Keyboard calibration complete");
@@ -134,7 +137,7 @@ public:
             for (uint8_t i = 0; i < keyCount && i < KeyScanStats::MAX_KEYS; i++) {
                 telemetry.readings[i] = readings[i];
                 telemetry.baselines[i] = baselines_[i];
-                telemetry.ratios[i] = readings[i] / baselines_[i];
+                telemetry.ratios[i] = (baselines_[i] > 0) ? (readings[i] / baselines_[i]) : 0.0f;  // Ratio of reading to baseline
                 telemetry.noteStates[i] = keyStates_[i];
                 telemetry.aftertouchValues[i] = lastAftertouch_[i];
             }
@@ -206,7 +209,14 @@ private:
      */
     void processKey(uint8_t keyIndex, uint16_t reading) {
         float baseline = baselines_[keyIndex];
-        float ratio = reading / baseline;
+        
+        // Ensure baseline is never too low to prevent ratio issues
+        if (baseline < MIN_BASELINE) {
+            baseline = MIN_BASELINE;
+            baselines_[keyIndex] = MIN_BASELINE;
+        }
+        
+        float ratio = reading / baseline;  // Ratio of current reading to baseline
         
         uint8_t midiNote = baseNote_ + keyIndex;
         
@@ -221,7 +231,10 @@ private:
                 // Baseline tracking freezes while key is touched
             } else {
                 // Update baseline (exponential moving average)
-                baselines_[keyIndex] = baseline * (1.0f - BASELINE_ALPHA) + reading * BASELINE_ALPHA;
+                baselines_[keyIndex] = std::max(
+                    baseline * (1.0f - BASELINE_ALPHA) + reading * BASELINE_ALPHA,
+                    MIN_BASELINE
+                );
             }
         }
         // State machine: Note On → Note Off or Aftertouch
@@ -231,12 +244,15 @@ private:
                 keyStates_[keyIndex] = false;
                 sendNoteOff(midiNote);
                 
-                // Resume baseline tracking
-                baselines_[keyIndex] = baseline * (1.0f - BASELINE_ALPHA) + reading * BASELINE_ALPHA;
+                // Resume baseline tracking with minimum enforcement
+                baselines_[keyIndex] = std::max(
+                    baseline * (1.0f - BASELINE_ALPHA) + reading * BASELINE_ALPHA,
+                    MIN_BASELINE
+                );
             } else {
                 // Polyphonic Aftertouch: map pressure to 0-127
-                // More capacitance (higher ratio) = more pressure
-                float pressure = (ratio - NOTE_OFF_THRESHOLD) / (2.0f - NOTE_OFF_THRESHOLD);
+                // Linear mapping: NOTE_OFF_THRESHOLD = 0, MAX_PRESSURE_RATIO = 127
+                float pressure = (ratio - NOTE_OFF_THRESHOLD) / (MAX_PRESSURE_RATIO - NOTE_OFF_THRESHOLD);
                 pressure = std::max(0.0f, std::min(1.0f, pressure));
                 uint8_t aftertouch = static_cast<uint8_t>(pressure * 127.0f);
                 

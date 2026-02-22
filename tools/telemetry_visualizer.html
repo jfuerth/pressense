@@ -258,11 +258,11 @@
             </div>
             <div class="legend-item">
                 <div class="legend-color" style="background: #f9c513;"></div>
-                <span>Note OFF Threshold (1.10× baseline)</span>
+                <span>Note OFF Threshold</span>
             </div>
             <div class="legend-item">
                 <div class="legend-color" style="background: #d73a49;"></div>
-                <span>Note ON Threshold (1.20× baseline)</span>
+                <span>Note ON Threshold</span>
             </div>
             <div class="legend-item">
                 <div class="legend-color" style="background: rgba(78, 201, 176, 0.3);"></div>
@@ -452,8 +452,8 @@
             let html = '';
             html += `<span class="info-label">Keys:</span><span class="info-value">${telemetryData.keyCount}</span>`;
             html += `<span class="info-label">Calibrated:</span><span class="info-value">${telemetryData.isCalibrated ? 'Yes' : 'No'}</span>`;
-            html += `<span class="info-label">Note ON Threshold:</span><span class="info-value">${telemetryData.noteOnThreshold.toFixed(2)}×</span>`;
-            html += `<span class="info-label">Note OFF Threshold:</span><span class="info-value">${telemetryData.noteOffThreshold.toFixed(2)}×</span>`;
+            html += `<span class="info-label">Note ON Threshold:</span><span class="info-value">${telemetryData.noteOnThreshold.toFixed(2)}</span>`;
+            html += `<span class="info-label">Note OFF Threshold:</span><span class="info-value">${telemetryData.noteOffThreshold.toFixed(2)}</span>`;
             
             // Count active notes
             const activeNotes = telemetryData.noteStates ? telemetryData.noteStates.filter(s => s).length : 0;
