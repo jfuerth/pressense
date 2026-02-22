@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cmath>
 #include <log.hpp>
+#include <json.hpp>
 
 namespace midi {
 
@@ -35,6 +36,25 @@ struct KeyScanStats {
     bool isCalibrated;
     uint16_t calibrationCount;
 };
+
+/**
+ * @brief JSON serialization for KeyScanStats
+ */
+inline void to_json(nlohmann::json& j, const KeyScanStats& s) {
+    j = nlohmann::json{
+        {"type", "keyScan"},
+        {"keyCount", s.keyCount},
+        {"isCalibrated", s.isCalibrated},
+        {"calibrationCount", s.calibrationCount},
+        {"noteOnThreshold", s.noteOnThreshold},
+        {"noteOffThreshold", s.noteOffThreshold},
+        {"readings", std::vector<uint16_t>(s.readings, s.readings + s.keyCount)},
+        {"baselines", std::vector<float>(s.baselines, s.baselines + s.keyCount)},
+        {"ratios", std::vector<float>(s.ratios, s.ratios + s.keyCount)},
+        {"noteStates", std::vector<bool>(s.noteStates, s.noteStates + s.keyCount)},
+        {"aftertouchValues", std::vector<uint8_t>(s.aftertouchValues, s.aftertouchValues + s.keyCount)}
+    };
+}
 
 /**
  * @brief Converts capacitive key scanner readings into MIDI messages

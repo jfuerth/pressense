@@ -302,6 +302,7 @@
         
         // Visualization state
         let telemetryData = null;
+        let audioStats = null;
         let canvas = document.getElementById('canvas');
         let ctx = canvas.getContext('2d');
         let persistentMaxValue = 10;  // Start at 10, only increases
@@ -399,8 +400,8 @@
                 try {
                     const data = JSON.parse(line);
                     
-                    // Check if it looks like telemetry data
-                    if (data.hasOwnProperty('keyCount') && data.hasOwnProperty('readings')) {
+                    // Check telemetry type using discriminator
+                    if (data.type === 'keyScan') {
                         telemetryData = data;
                         
                         // Format JSON with arrays on single lines
@@ -412,9 +413,18 @@
                         
                         updateInfo();
                         return;  // Don't log telemetry
+                    } else if (data.type === 'audio') {
+                        audioStats = data;
+                        
+                        // Format audio stats as readable log message
+                        const msg = `Audio stats: loop[avg=${data.avgLoopTime} us, max=${data.maxLoopTime} us, budget=${data.bufferDuration} us] ` +
+                                  `scan[${data.avgScanTime} us] render[${data.avgRenderTime} us] ` +
+                                  `underruns=${data.underrunCount} partial=${data.partialWriteCount} core=${data.coreId}`;
+                        addLog(msg);
+                        return;
                     }
                     
-                    // Valid JSON but not telemetry, log it
+                    // Valid JSON but not recognized telemetry type, log it
                     addLog(line);
                 } catch (error) {
                     // JSON parse failed - corrupted/partial data from serial

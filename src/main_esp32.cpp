@@ -3,6 +3,7 @@
 #include <esp32_telemetry_sink.hpp>
 #include <midi_keyboard_controller.hpp>
 #include <synth_application.hpp>
+#include <audio_stats.hpp>
 #include <log.hpp>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -17,6 +18,7 @@ static std::unique_ptr<platform::SynthApplication> gSynth;
 static std::unique_ptr<esp32::ESP32CapacitiveScanner> gScanner;
 static std::unique_ptr<midi::MidiKeyboardController> gKeyboard;
 static std::unique_ptr<esp32::I2sAudioSink> gAudioSink;
+static std::unique_ptr<esp32::Esp32TelemetrySink<platform::AudioStats>> gAudioTelemetry;
 
 /**
  * @brief Audio rendering task - pinned to core 1 for dedicated audio processing
@@ -50,7 +52,6 @@ void audioTask(void* parameter) {
         });
         now = esp_timer_get_time();
         uint32_t renderTime = now - startTime;
-        startTime = now;
 
         if (renderTime > maxRenderTime) {
             maxRenderTime = renderTime;
@@ -61,14 +62,23 @@ void audioTask(void* parameter) {
 
         frameCount++;
         
-        // Stats logging
+        // Send telemetry every 1000 frames
         if (frameCount % 1000 == 0) {
             uint32_t totalLoopTime = totalScanTime + totalRenderTime;
-            uint32_t avgLoopTime = totalLoopTime / 1000;
-            uint32_t bufferDuration = (BUFFER_FRAMES * 1000000) / actualSampleRate;  // microseconds
+            uint32_t bufferDuration = (BUFFER_FRAMES * 1000000) / actualSampleRate;
             
-            logInfo("Audio stats: loop[avg=%lu us, max=%lu us, budget=%lu us] scan[%lu us] render[%lu us]",
-                    avgLoopTime, maxRenderTime, bufferDuration, totalScanTime / 1000, totalRenderTime / 1000);
+            platform::AudioStats stats;
+            stats.frameCount = frameCount;
+            stats.avgLoopTime = totalLoopTime / 1000;
+            stats.maxLoopTime = maxRenderTime;
+            stats.bufferDuration = bufferDuration;
+            stats.avgScanTime = totalScanTime / 1000;
+            stats.avgRenderTime = totalRenderTime / 1000;
+            stats.underrunCount = gAudioSink->getUnderrunCount();
+            stats.partialWriteCount = gAudioSink->getPartialWriteCount();
+            stats.coreId = xPortGetCoreID();
+            
+            gAudioTelemetry->sendTelemetry(stats);
             
             maxRenderTime = 0;
             totalScanTime = 0;
@@ -108,7 +118,7 @@ extern "C" void app_main(void) {
     gScanner = std::make_unique<esp32::ESP32CapacitiveScanner>();
     
     logInfo("Initializing MIDI keyboard controller...");
-    auto telemetrySink = std::make_unique<esp32::Esp32TelemetrySink>();
+    auto keyScanTelemetry = std::make_unique<esp32::Esp32TelemetrySink<midi::KeyScanStats>>("keyscan_telem", 0);
     gKeyboard = std::make_unique<midi::MidiKeyboardController>(
         *gScanner,
         [](uint8_t byte) {
@@ -116,13 +126,17 @@ extern "C" void app_main(void) {
                 gSynth->processMidiByte(byte);
             }
         },
-        std::move(telemetrySink),
+        std::move(keyScanTelemetry),
         60,  // Base note: C4
         20   // Fixed velocity
     );
     
     // Enable telemetry output
     gKeyboard->setTelemetryEnabled(true);
+    
+    // Create audio telemetry sink
+    logInfo("Initializing audio telemetry...");
+    gAudioTelemetry = std::make_unique<esp32::Esp32TelemetrySink<platform::AudioStats>>("audio_telem", 0);
     
     logInfo("\nCreating audio task on core 1...");
     

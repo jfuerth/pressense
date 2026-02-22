@@ -14,24 +14,30 @@ namespace esp32 {
 /**
  * @brief ESP32 telemetry sink using FreeRTOS queue and background task
  * 
- * Encapsulates queue creation, task spawning, and JSON serialization.
+ * Generic template-based implementation that works with any telemetry data type.
+ * Requires the data type to have a to_json() function defined for serialization.
  * Outputs telemetry data as JSON Lines to console.
  * Properly cleans up resources in destructor.
+ * 
+ * @tparam TelemetryDataT Type of telemetry data (must have to_json function)
  */
-class Esp32TelemetrySink : public features::TelemetrySink<midi::KeyScanStats> {
+template<typename TelemetryDataT>
+class Esp32TelemetrySink : public features::TelemetrySink<TelemetryDataT> {
 public:
     /**
      * @brief Construct ESP32 telemetry sink
      * 
      * Creates queue and spawns background task for JSON serialization.
+     * @param taskName Name of the telemetry task (for debugging)
+     * @param priority FreeRTOS task priority
      */
-    Esp32TelemetrySink()
+    Esp32TelemetrySink(const std::string taskName = "telemetry", UBaseType_t priority = 0)
         : queue_(nullptr)
         , taskHandle_(nullptr)
         , shouldStop_(false)
     {
         // Create single-slot overwrite queue
-        queue_ = xQueueCreate(1, sizeof(midi::KeyScanStats));
+        queue_ = xQueueCreate(1, sizeof(TelemetryDataT));
         if (queue_ == nullptr) {
             logError("Failed to create telemetry queue");
             return;
@@ -40,23 +46,23 @@ public:
         // Spawn telemetry output task pinned to core 0 (keep away from audio on core 1)
         BaseType_t taskCreated = xTaskCreatePinnedToCore(
             telemetryTaskWrapper,
-            "telemetry",
+            taskName.c_str(),
             4096,  // 4KB stack for JSON serialization
             this,  // Pass 'this' pointer as parameter
-            0,     // Priority 0 (lowest - below scanner)
+            priority,
             &taskHandle_,
             0      // Core 0 (PRO_CPU)
         );
         
         if (taskCreated != pdPASS) {
-            logError("Failed to create telemetry task");
+            logError("Failed to create telemetry task: %s", taskName.c_str());
             vQueueDelete(queue_);
             queue_ = nullptr;
             taskHandle_ = nullptr;
         } else {
-            logInfo("Telemetry task started");
+            logInfo("Telemetry task started: %s", taskName.c_str());
         }
-    }
+    };
     
     /**
      * @brief Destructor - stops task and cleans up resources
@@ -93,7 +99,7 @@ public:
     Esp32TelemetrySink(const Esp32TelemetrySink&) = delete;
     Esp32TelemetrySink& operator=(const Esp32TelemetrySink&) = delete;
     
-    void sendTelemetry(const midi::KeyScanStats& data) override {
+    void sendTelemetry(const TelemetryDataT& data) override {
         if (queue_ != nullptr && !shouldStop_) {
             // Overwrite queue (non-blocking, replaces old data)
             xQueueOverwrite(queue_, &data);
@@ -109,7 +115,7 @@ private:
      * @brief Static wrapper for FreeRTOS task creation
      */
     static void telemetryTaskWrapper(void* parameter) {
-        auto* sink = static_cast<Esp32TelemetrySink*>(parameter);
+        auto* sink = static_cast<Esp32TelemetrySink<TelemetryDataT>*>(parameter);
         sink->telemetryTask();
     }
     
@@ -117,7 +123,7 @@ private:
      * @brief Background task that reads queue and outputs JSON Lines
      */
     void telemetryTask() {
-        midi::KeyScanStats telemetry;
+        TelemetryDataT telemetry;
         
         while (!shouldStop_) {
             // Block waiting for telemetry data with timeout to check stop flag
@@ -126,28 +132,8 @@ private:
                     break;
                 }
                 
-                // Serialize to JSON using nlohmann/json
-                nlohmann::json j;
-                j["keyCount"] = telemetry.keyCount;
-                j["isCalibrated"] = telemetry.isCalibrated;
-                j["calibrationCount"] = telemetry.calibrationCount;
-                j["noteOnThreshold"] = telemetry.noteOnThreshold;
-                j["noteOffThreshold"] = telemetry.noteOffThreshold;
-                
-                // Per-key arrays
-                j["readings"] = nlohmann::json::array();
-                j["baselines"] = nlohmann::json::array();
-                j["ratios"] = nlohmann::json::array();
-                j["noteStates"] = nlohmann::json::array();
-                j["aftertouchValues"] = nlohmann::json::array();
-                
-                for (uint8_t i = 0; i < telemetry.keyCount; i++) {
-                    j["readings"].push_back(telemetry.readings[i]);
-                    j["baselines"].push_back(telemetry.baselines[i]);
-                    j["ratios"].push_back(telemetry.ratios[i]);
-                    j["noteStates"].push_back(telemetry.noteStates[i]);
-                    j["aftertouchValues"].push_back(telemetry.aftertouchValues[i]);
-                }
+                // Serialize to JSON using automatic conversion via to_json()
+                nlohmann::json j = telemetry;
                 
                 // Output as JSON Lines (one object per line, starts with '{')
                 printf("%s\n", j.dump().c_str());
