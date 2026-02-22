@@ -37,14 +37,15 @@ public:
             return;
         }
         
-        // Spawn telemetry output task
-        BaseType_t taskCreated = xTaskCreate(
+        // Spawn telemetry output task pinned to core 0 (keep away from audio on core 1)
+        BaseType_t taskCreated = xTaskCreatePinnedToCore(
             telemetryTaskWrapper,
             "telemetry",
             4096,  // 4KB stack for JSON serialization
             this,  // Pass 'this' pointer as parameter
-            1,     // Low priority (below audio/scanner)
-            &taskHandle_
+            0,     // Priority 0 (lowest - below scanner)
+            &taskHandle_,
+            0      // Core 0 (PRO_CPU)
         );
         
         if (taskCreated != pdPASS) {

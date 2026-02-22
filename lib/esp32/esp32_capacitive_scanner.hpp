@@ -29,7 +29,6 @@ public:
     static constexpr uint32_t SETTLE_TIME_US = 5;  // Minimal settle time
     static constexpr uint8_t MOVING_AVG_SAMPLES = 5;
     static constexpr uint16_t MIN_BASELINE_VALUE = 1;  // Minimum baseline to avoid ratio issues
-    static constexpr uint32_t POLL_YIELD_INTERVAL_US = 40;  // Yield CPU every N microseconds during polling
     
     /**
      * @brief Construct and start the capacitive scanner task
@@ -67,14 +66,15 @@ public:
             currentReadings_[i] = 0;
         }
         
-        // Create scanning task
-        xTaskCreate(
+        // Create scanning task pinned to core 0 (keep away from audio on core 1)
+        xTaskCreatePinnedToCore(
             scanTaskWrapper,
             "cap_scan",
             4096,  // Stack size
             this,  // Pass this pointer to static wrapper
-            1,     // Priority (same as arpeggio task)
-            &taskHandle_
+            1,     // Priority 1 (higher than telemetry, lower than audio)
+            &taskHandle_,
+            0      // Core 0 (PRO_CPU)
         );
         
         logInfo("ESP32 capacitive scanner started with %d keys", NUM_KEYS);
@@ -134,20 +134,13 @@ private:
         gpio_set_direction(gpio, GPIO_MODE_INPUT);
         
         uint64_t startTime = esp_timer_get_time();
-        uint64_t lastYield = startTime;
         uint64_t elapsed = 0;
         
-        // Poll until high or timeout, yielding periodically to other tasks
+        // Poll until high or timeout
         while (gpio_get_level(gpio) == 0) {
             elapsed = esp_timer_get_time() - startTime;
             if (elapsed >= TIMEOUT_US) {
                 break;
-            }
-            
-            // Yield CPU periodically during long measurements to prevent blocking
-            if (elapsed - (lastYield - startTime) >= POLL_YIELD_INTERVAL_US) {
-                esp_rom_delay_us(1);  // Minimal delay to allow task switch
-                lastYield = esp_timer_get_time();
             }
         }
         
@@ -167,7 +160,7 @@ private:
             // Allow GPIO state to settle before next measurement
             esp_rom_delay_us(SETTLE_TIME_US);
             
-            // Yield CPU to prevent starving other tasks (especially audio)
+            // Yield CPU to allow other tasks to run if ready (currently none should be, but good practice in case of future changes)
             taskYIELD();
             
             // Update moving average buffer
