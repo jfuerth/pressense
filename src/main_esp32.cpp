@@ -8,10 +8,15 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_timer.h>
+#include <xtensa/hal.h>
 #include <memory>
 
 // Platform-specific implementations
 #include <embedded_program_storage.hpp>
+
+// CPU frequency for cycle-to-microsecond conversion
+// ESP32 @ 240MHz = 240 cycles per microsecond
+static constexpr uint32_t CYCLES_PER_MICROSECOND = 240;
 
 // Global instances
 static std::unique_ptr<platform::SynthApplication> gSynth;
@@ -78,6 +83,41 @@ void audioTask(void* parameter) {
             stats.partialWriteCount = gAudioSink->getPartialWriteCount();
             stats.coreId = xPortGetCoreID();
             
+#ifdef ENABLE_AUDIO_TIMING_STATS
+            // Collect detailed timing breakdown
+            platform::TimingStats voiceMixing, outputProcessing, stereoDup;
+            gSynth->getAndResetTimingStats(voiceMixing, outputProcessing, stereoDup);
+            
+            platform::TimingStats floatToInt, i2sWrite;
+            gAudioSink->getAndResetTimingStats(floatToInt, i2sWrite);
+            
+            platform::VoiceTimingStats voiceComponents = gSynth->getAndResetVoiceTimingStats();
+            
+            // Populate timing breakdown (convert cycles to microseconds)
+            stats.timing.avgVoiceMixing = voiceMixing.getAverage() / CYCLES_PER_MICROSECOND;
+            stats.timing.minVoiceMixing = voiceMixing.minTime / CYCLES_PER_MICROSECOND;
+            stats.timing.maxVoiceMixing = voiceMixing.maxTime / CYCLES_PER_MICROSECOND;
+            
+            stats.timing.avgOutputProcessing = outputProcessing.getAverage() / CYCLES_PER_MICROSECOND;
+            stats.timing.minOutputProcessing = outputProcessing.minTime / CYCLES_PER_MICROSECOND;
+            stats.timing.maxOutputProcessing = outputProcessing.maxTime / CYCLES_PER_MICROSECOND;
+            
+            stats.timing.avgStereoDup = stereoDup.getAverage() / CYCLES_PER_MICROSECOND;
+            stats.timing.minStereoDup = stereoDup.minTime / CYCLES_PER_MICROSECOND;
+            stats.timing.maxStereoDup = stereoDup.maxTime / CYCLES_PER_MICROSECOND;
+            
+            stats.timing.avgFloatToInt = floatToInt.getAverage() / CYCLES_PER_MICROSECOND;
+            stats.timing.minFloatToInt = floatToInt.minTime / CYCLES_PER_MICROSECOND;
+            stats.timing.maxFloatToInt = floatToInt.maxTime / CYCLES_PER_MICROSECOND;
+            
+            stats.timing.avgI2sWrite = i2sWrite.getAverage() / CYCLES_PER_MICROSECOND;
+            stats.timing.minI2sWrite = i2sWrite.minTime / CYCLES_PER_MICROSECOND;
+            stats.timing.maxI2sWrite = i2sWrite.maxTime / CYCLES_PER_MICROSECOND;
+            
+            // Convert voice component timing from cycles to microseconds
+            stats.timing.voiceComponents = voiceComponents.convertToMicroseconds(CYCLES_PER_MICROSECOND);
+#endif
+            
             gAudioTelemetry->sendTelemetry(stats);
             
             maxRenderTime = 0;
@@ -127,7 +167,7 @@ extern "C" void app_main(void) {
             }
         },
         std::move(keyScanTelemetry),
-        60,  // Base note: C4
+        60-24,  // Base note: C4
         20   // Fixed velocity
     );
     

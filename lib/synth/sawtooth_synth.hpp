@@ -5,7 +5,12 @@
 #include <wavetable_oscillator.hpp>
 #include <adsr_envelope.hpp>
 #include <biquad_filter.hpp>
+#include <voice_timing_stats.hpp>
 #include <cmath>
+
+#if defined(ESP_PLATFORM) && defined(ENABLE_AUDIO_TIMING_STATS)
+#include <xtensa/hal.h>  // For xthal_get_ccount() - CPU cycle counter
+#endif
 
 namespace synth {
 
@@ -137,16 +142,41 @@ public:
      * @return Audio sample in range [-1.0, 1.0]
      */
     float nextSample() {
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        uint32_t startCycles, nowCycles;
+#endif
+        
         if (!ampEnvelope_.isActive()) {
             return 0.0f;
         }
+        
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        // Timing: Pitch bend calculation (using CPU cycle counter for lower overhead)
+        startCycles = xthal_get_ccount();
+#endif
         
         // Calculate current frequency with pitch bend (inline)
         float semitoneShift = pitchBend_ * pitchBendRange_;
         float frequency = baseFrequency_ * std::pow(2.0f, semitoneShift / 12.0f);
         
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        nowCycles = xthal_get_ccount();
+        voiceTimingStats_.recordPitchBend(nowCycles - startCycles);
+        
+        // Timing: Oscillator
+        startCycles = nowCycles;
+#endif
+        
         // Generate oscillator sample
         float sample = oscillator_.nextSample(frequency);
+        
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        nowCycles = xthal_get_ccount();
+        voiceTimingStats_.recordOscillator(nowCycles - startCycles);
+        
+        // Timing: Filter envelope
+        startCycles = nowCycles;
+#endif
         
         // Calculate filter cutoff with envelope modulation
         // baseCutoff_ is controlled directly via setter method; envelope adds modulation on top
@@ -158,19 +188,58 @@ public:
         // Apply modulation (exponential, upward only)
         float modulatedCutoff = baseCutoff_ * (1.0f + envModulation * 9.0f);  // Up to 10x base cutoff
         
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        nowCycles = xthal_get_ccount();
+        voiceTimingStats_.recordFilterEnv(nowCycles - startCycles);
+        
+        // Timing: Filter setCutoff (coefficient recalculation)
+        startCycles = nowCycles;
+#endif
+        
         // PERF: This triggers coefficient recalculation every sample during envelope movement.
         // If polyphony is limited on embedded (ESP32/RP2350), consider quantizing cutoff changes
         // or rate-limiting updates (e.g., update filter every N samples, interpolate between).
         filter_.setCutoff(modulatedCutoff);
         
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        nowCycles = xthal_get_ccount();
+        voiceTimingStats_.recordFilterSetCutoff(nowCycles - startCycles);
+        
+        // Timing: Filter processing
+        startCycles = nowCycles;
+#endif
+        
         // Apply filter
         sample = filter_.processSample(sample);
+        
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        nowCycles = xthal_get_ccount();
+        voiceTimingStats_.recordFilterProcess(nowCycles - startCycles);
+        
+        // Timing: Amplitude envelope
+        startCycles = nowCycles;
+#endif
         
         // Apply amplitude envelope and volume
         float ampEnvLevel = ampEnvelope_.nextSample();
         sample *= ampEnvLevel * volume_;
         
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        nowCycles = xthal_get_ccount();
+        voiceTimingStats_.recordAmpEnv(nowCycles - startCycles);
+#endif
+        
         return sample;
+    }
+    
+    /**
+     * @brief Get detailed voice timing statistics and reset
+     * ESP32 only - timing instrumentation for optimization
+     */
+    platform::VoiceTimingStats getAndResetVoiceTimingStats() {
+        platform::VoiceTimingStats result = voiceTimingStats_;
+        voiceTimingStats_.reset();
+        return result;
     }
 
 private:
@@ -189,6 +258,9 @@ private:
     float pitchBendRange_ = 2.0f;
     float baseCutoff_ = 1000.0f;    // Base filter cutoff (controlled by setter)
     float filterEnvAmount_ = 0.5f;  // 50% modulation by default
+    
+    // Detailed timing instrumentation (ESP32 only)
+    platform::VoiceTimingStats voiceTimingStats_;
 };
 
 } // namespace synth

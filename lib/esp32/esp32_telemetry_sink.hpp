@@ -47,7 +47,7 @@ public:
         BaseType_t taskCreated = xTaskCreatePinnedToCore(
             telemetryTaskWrapper,
             taskName.c_str(),
-            4096,  // 4KB stack for JSON serialization
+            8192,  // 8KB stack (JSON serialization uses stack allocation)
             this,  // Pass 'this' pointer as parameter
             priority,
             &taskHandle_,

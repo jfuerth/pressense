@@ -4,6 +4,7 @@
 #include <stream_processor.hpp>
 #include <simple_voice_allocator.hpp>
 #include <output_processor.hpp>
+#include <timing_stats.hpp>
 #include <log.hpp>
 #include <memory>
 #include <functional>
@@ -14,6 +15,10 @@
 
 #ifdef FEATURE_CLIPBOARD
 #include <clipboard.hpp>
+#endif
+
+#if defined(ESP_PLATFORM) && defined(ENABLE_AUDIO_TIMING_STATS)
+#include <xtensa/hal.h>  // For xthal_get_ccount() - CPU cycle counter
 #endif
 
 namespace platform {
@@ -88,6 +93,13 @@ public:
      * @param numFrames Number of frames to render
      */
     void renderAudio(float* buffer, unsigned int numFrames) {
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        uint32_t startCycles, nowCycles;
+        
+        // Timing: Voice mixing
+        startCycles = xthal_get_ccount();
+#endif
+        
         // Get all voices
         std::vector<synth::WavetableSynth*> activeSynths;
         midiProcessor_->forEachVoice([&](midi::Synth& synth) {
@@ -100,6 +112,7 @@ public:
         }
         
         // Pass 1: Mix all voices into mono buffer
+        // Note: Per-voice timing is tracked inside WavetableSynth::nextSample()
         for (unsigned int frame = 0; frame < numFrames; ++frame) {
             float sample = 0.0f;
             for (auto* synth : activeSynths) {
@@ -108,8 +121,24 @@ public:
             monoBuffer_[frame] = sample;
         }
         
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        nowCycles = xthal_get_ccount();
+        timingVoiceMixing_.record(nowCycles - startCycles);
+        
+        // Timing: Output processing
+        startCycles = nowCycles;
+#endif
+        
         // Pass 2: Process with output processor
         outputProcessor_.processBuffer(monoBuffer_.data(), numFrames);
+        
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        nowCycles = xthal_get_ccount();
+        timingOutputProcessing_.record(nowCycles - startCycles);
+        
+        // Timing: Stereo duplication
+        startCycles = nowCycles;
+#endif
         
         // Pass 3: Duplicate processed mono to stereo
         for (unsigned int frame = 0; frame < numFrames; ++frame) {
@@ -117,6 +146,47 @@ public:
             buffer[frame * channels_ + 0] = processed; // Left
             buffer[frame * channels_ + 1] = processed; // Right
         }
+        
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        nowCycles = xthal_get_ccount();
+        timingStereoDup_.record(nowCycles - startCycles);
+#endif
+    }
+    
+    /**
+     * @brief Get timing statistics and reset counters
+     * @param outVoiceMixing Voice mixing timing stats
+     * @param outOutputProcessing Output processing timing stats
+     * @param outStereoDup Stereo duplication timing stats
+     */
+    void getAndResetTimingStats(TimingStats& outVoiceMixing,
+                                 TimingStats& outOutputProcessing,
+                                 TimingStats& outStereoDup) {
+        outVoiceMixing = timingVoiceMixing_;
+        outOutputProcessing = timingOutputProcessing_;
+        outStereoDup = timingStereoDup_;
+        
+        timingVoiceMixing_.reset();
+        timingOutputProcessing_.reset();
+        timingStereoDup_.reset();
+    }
+    
+    /**
+     * @brief Access voice timing for aggregation
+     * Called by main loop to collect per-voice component timing
+     */
+    VoiceTimingStats getAndResetVoiceTimingStats() {
+        VoiceTimingStats combined;
+        
+        midiProcessor_->forEachVoice([&](midi::Synth& synth) {
+            auto& ws = static_cast<synth::WavetableSynth&>(synth);
+            auto voiceStats = ws.getAndResetVoiceTimingStats();
+            
+            // Merge per-voice stats
+            combined.merge(voiceStats);
+        });
+        
+        return combined;
     }
     
     midi::StreamProcessor& getMidiProcessor() { return *midiProcessor_; }
@@ -258,6 +328,11 @@ private:
     std::vector<float> monoBuffer_;
     
     std::unique_ptr<features::ProgramStorage> programStorage_;
+    
+    // Timing statistics (ESP32 only)
+    TimingStats timingVoiceMixing_;
+    TimingStats timingOutputProcessing_;
+    TimingStats timingStereoDup_;
 
 #ifdef FEATURE_CLIPBOARD
     std::unique_ptr<features::Clipboard> clipboard_;

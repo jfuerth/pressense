@@ -4,6 +4,11 @@
 #include <vector>
 #include <stdexcept>
 #include <log.hpp>
+#include <timing_stats.hpp>
+
+#ifdef ENABLE_AUDIO_TIMING_STATS
+#include <xtensa/hal.h>  // For xthal_get_ccount() - CPU cycle counter
+#endif
 
 namespace esp32 {
 
@@ -120,8 +125,17 @@ public:
      */
     template<typename Callback>
     void write(Callback fillCallback) {
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        uint32_t startCycles, nowCycles;
+#endif
+        
         // Fill buffer with audio data (float format)
         fillCallback(buffer_.data(), bufferFrames_);
+        
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        // Timing: Float-to-int conversion
+        startCycles = xthal_get_ccount();
+#endif
         
         // Convert float to 32-bit integer for I2S
         // PCM5102 expects 32-bit data, MSB first
@@ -140,12 +154,25 @@ public:
             i2sBuffer_[i] = sample24 << 8;
         }
         
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        nowCycles = xthal_get_ccount();
+        timingFloatToInt_.record(nowCycles - startCycles);
+        
+        // Timing: I2S write
+        startCycles = nowCycles;
+#endif
+        
         // Write to I2S
         size_t bytesWritten = 0;
         size_t bytesToWrite = bufferFrames_ * channels_ * sizeof(int32_t);
         esp_err_t err = i2s_write(i2sPort_, i2sBuffer_.data(), 
                                   bytesToWrite,
                                   &bytesWritten, portMAX_DELAY);
+        
+#ifdef ENABLE_AUDIO_TIMING_STATS
+        nowCycles = xthal_get_ccount();
+        timingI2sWrite_.record(nowCycles - startCycles);
+#endif
         
         if (err != ESP_OK) {
             logError("I2S write failed: %d", err);
@@ -169,6 +196,18 @@ public:
         }
     }
     
+    /**
+     * @brief Get timing statistics and reset
+     */
+    void getAndResetTimingStats(platform::TimingStats& outFloatToInt,
+                                 platform::TimingStats& outI2sWrite) {
+        outFloatToInt = timingFloatToInt_;
+        outI2sWrite = timingI2sWrite_;
+        
+        timingFloatToInt_.reset();
+        timingI2sWrite_.reset();
+    }
+    
     // Get underrun statistics
     uint32_t getUnderrunCount() const { return underrunCount_; }
     uint32_t getPartialWriteCount() const { return partialWriteCount_; }
@@ -189,6 +228,10 @@ private:
     // Underrun detection counters
     uint32_t underrunCount_;
     uint32_t partialWriteCount_;
+    
+    // Timing instrumentation
+    platform::TimingStats timingFloatToInt_;
+    platform::TimingStats timingI2sWrite_;
 };
 
 } // namespace esp32
