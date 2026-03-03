@@ -1,5 +1,4 @@
-#ifndef PROGRAM_DATA_HPP
-#define PROGRAM_DATA_HPP
+#pragma once
 
 #include <biquad_filter.hpp>
 #include <sawtooth_synth.hpp>
@@ -114,4 +113,3 @@ inline void from_json(const nlohmann::json& j, ProgramData& p) {
 
 } // namespace midi
 
-#endif // PROGRAM_DATA_HPP

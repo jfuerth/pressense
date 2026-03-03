@@ -1,5 +1,4 @@
-#ifndef OUTPUT_PROCESSOR_HPP
-#define OUTPUT_PROCESSOR_HPP
+#pragma once
 
 #include <cmath>
 #include <vector>
@@ -265,4 +264,3 @@ private:
 
 } // namespace synth
 
-#endif // OUTPUT_PROCESSOR_HPP

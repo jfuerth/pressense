@@ -10,11 +10,11 @@ StreamProcessor::StreamProcessor(
         ControlChangeCallback ccCallback,
         PolyAftertouchCallback polyAftertouchCallback,
         ProgramChangeCallback programChangeCallback)
-    : synthVoiceAllocator(std::move(voiceAllocator))
-    , controlChangeCallback(ccCallback)
-    , polyAftertouchCallback(polyAftertouchCallback)
-    , programChangeCallback(programChangeCallback)
-    , listenChannel(listenChannel)
+    : synthVoiceAllocator_(std::move(voiceAllocator))
+    , controlChangeCallback_(ccCallback)
+    , polyAftertouchCallback_(polyAftertouchCallback)
+    , programChangeCallback_(programChangeCallback)
+    , listenChannel_(listenChannel)
 {
     // Constructor implementation - dependencies are moved and stored
 }
@@ -63,25 +63,25 @@ void StreamProcessor::process(const uint8_t data)
         uint8_t command = extractCommand(data);
         
         // Only process messages on our listen channel
-        if (channel != listenChannel) {
-            currentCommand = 0;
-            processorState = Initial;
+        if (channel != listenChannel_) {
+            currentCommand_ = 0;
+            processorState_ = Initial;
             return;
         }
         
-        currentCommand = command;
-        processorState = stateFromCommandByte(command);
+        currentCommand_ = command;
+        processorState_ = stateFromCommandByte(command);
 
-    } else if (processorState == Need2Bytes) {
-        messageByte1 = data;
-        processorState = Need1Byte;
+    } else if (processorState_ == Need2Bytes) {
+        messageByte1_ = data;
+        processorState_ = Need1Byte;
 
-    } else if (processorState == Need1Byte) {
-        if (currentCommand == (NOTE_ON_COMMAND)) {
-            uint8_t note = messageByte1;
+    } else if (processorState_ == Need1Byte) {
+        if (currentCommand_ == (NOTE_ON_COMMAND)) {
+            uint8_t note = messageByte1_;
             uint8_t velocity = data;
 
-            Synth& voice = synthVoiceAllocator->allocate(note);
+            Synth& voice = synthVoiceAllocator_->allocate(note);
 
             if (velocity == 0) {
                 // Note On with velocity 0 is treated as Note Off
@@ -92,42 +92,42 @@ void StreamProcessor::process(const uint8_t data)
                 voice.trigger(frequencyHz, volume);
             }
 
-        } else if (currentCommand == (NOTE_OFF_COMMAND)) {
-            uint8_t note = messageByte1;
+        } else if (currentCommand_ == (NOTE_OFF_COMMAND)) {
+            uint8_t note = messageByte1_;
             // data is release velocity (ignored)
-            Synth& voice = synthVoiceAllocator->allocate(note);
+            Synth& voice = synthVoiceAllocator_->allocate(note);
             voice.release();
 
-        } else if (currentCommand == (POLY_AFTERTOUCH_COMMAND)) {
-            uint8_t note = messageByte1;
+        } else if (currentCommand_ == (POLY_AFTERTOUCH_COMMAND)) {
+            uint8_t note = messageByte1_;
             uint8_t pressure = data;
             
             // Poly aftertouch affects only the specific note's voice
-            Synth* voice = synthVoiceAllocator->findAllocated(note);
-            if (voice && polyAftertouchCallback) {
-                polyAftertouchCallback(listenChannel, note, pressure, *voice);
+            Synth* voice = synthVoiceAllocator_->findAllocated(note);
+            if (voice && polyAftertouchCallback_) {
+                polyAftertouchCallback_(listenChannel_, note, pressure, *voice);
             }
 
-        } else if (currentCommand == (CONTROL_CHANGE_COMMAND) && messageByte1 < 120) {
-            uint8_t controllerNumber = messageByte1;
+        } else if (currentCommand_ == (CONTROL_CHANGE_COMMAND) && messageByte1_ < 120) {
+            uint8_t controllerNumber = messageByte1_;
             uint8_t controllerValue = data;
 
             // Delegate to application callback if provided
-            if (controlChangeCallback) {
-                controlChangeCallback(listenChannel, controllerNumber, controllerValue, *synthVoiceAllocator);
+            if (controlChangeCallback_) {
+                controlChangeCallback_(listenChannel_, controllerNumber, controllerValue, *synthVoiceAllocator_);
             }
             // Otherwise, no default behavior (application must provide mapping)
 
-        } else if (currentCommand == (PROGRAM_CHANGE_COMMAND)) {
+        } else if (currentCommand_ == (PROGRAM_CHANGE_COMMAND)) {
             uint8_t programNumber = data;  // Program Change is 1-byte message, data comes directly
             
             // Delegate to application callback if provided
-            if (programChangeCallback) {
-                programChangeCallback(listenChannel, programNumber, *synthVoiceAllocator);
+            if (programChangeCallback_) {
+                programChangeCallback_(listenChannel_, programNumber, *synthVoiceAllocator_);
             }
 
-        } else if (currentCommand == (PITCH_BEND_COMMAND)) {
-            uint8_t lsb = messageByte1;
+        } else if (currentCommand_ == (PITCH_BEND_COMMAND)) {
+            uint8_t lsb = messageByte1_;
             uint8_t msb = data;
             
             // Combine LSB and MSB into 14-bit value
@@ -139,15 +139,15 @@ void StreamProcessor::process(const uint8_t data)
             
             // Apply pitch bend to all voices via forEachVoice
             // This ensures even voices not currently assigned to notes get updated
-            synthVoiceAllocator->forEachVoice([normalizedBend](Synth& voice) {
+            synthVoiceAllocator_->forEachVoice([normalizedBend](Synth& voice) {
                 voice.setPitchBend(normalizedBend);
             });
         }
 
-        processorState = stateFromCommandByte(currentCommand);
+        processorState_ = stateFromCommandByte(currentCommand_);
 
     } else {
-        processorState = stateFromCommandByte(currentCommand);
+        processorState_ = stateFromCommandByte(currentCommand_);
     }
 }
 

@@ -1,5 +1,4 @@
-#ifndef WAVETABLE_OSCILLATOR_HPP
-#define WAVETABLE_OSCILLATOR_HPP
+#pragma once
 
 #include <cmath>
 
@@ -121,4 +120,3 @@ private:
 
 } // namespace synth
 
-#endif // WAVETABLE_OSCILLATOR_HPP

@@ -1,5 +1,4 @@
-#ifndef ADSR_ENVELOPE_HPP
-#define ADSR_ENVELOPE_HPP
+#pragma once
 
 namespace synth {
 
@@ -185,4 +184,3 @@ private:
 
 } // namespace synth
 
-#endif // ADSR_ENVELOPE_HPP

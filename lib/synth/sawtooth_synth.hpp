@@ -1,5 +1,4 @@
-#ifndef SAWTOOTH_SYNTH_HPP
-#define SAWTOOTH_SYNTH_HPP
+#pragma once
 
 #include <synth.hpp>
 #include <wavetable_oscillator.hpp>
@@ -8,8 +7,8 @@
 #include <voice_timing_stats.hpp>
 #include <cmath>
 
-#if defined(ESP_PLATFORM) && defined(ENABLE_AUDIO_TIMING_STATS)
-#include <xtensa/hal.h>  // For xthal_get_ccount() - CPU cycle counter
+#ifdef FEATURE_PERFORMANCE_TIMING
+#include <timing.hpp>
 #endif
 
 namespace synth {
@@ -142,7 +141,7 @@ public:
      * @return Audio sample in range [-1.0, 1.0]
      */
     float nextSample() {
-#ifdef ENABLE_AUDIO_TIMING_STATS
+#ifdef FEATURE_PERFORMANCE_TIMING
         uint32_t startCycles, nowCycles;
 #endif
         
@@ -150,17 +149,17 @@ public:
             return 0.0f;
         }
         
-#ifdef ENABLE_AUDIO_TIMING_STATS
+#ifdef FEATURE_PERFORMANCE_TIMING
         // Timing: Pitch bend calculation (using CPU cycle counter for lower overhead)
-        startCycles = xthal_get_ccount();
+        startCycles = platform::PlatformTimer::getCycles();
 #endif
         
         // Calculate current frequency with pitch bend (inline)
         float semitoneShift = pitchBend_ * pitchBendRange_;
         float frequency = baseFrequency_ * std::pow(2.0f, semitoneShift / 12.0f);
         
-#ifdef ENABLE_AUDIO_TIMING_STATS
-        nowCycles = xthal_get_ccount();
+#ifdef FEATURE_PERFORMANCE_TIMING
+        nowCycles = platform::PlatformTimer::getCycles();
         voiceTimingStats_.recordPitchBend(nowCycles - startCycles);
         
         // Timing: Oscillator
@@ -170,8 +169,8 @@ public:
         // Generate oscillator sample
         float sample = oscillator_.nextSample(frequency);
         
-#ifdef ENABLE_AUDIO_TIMING_STATS
-        nowCycles = xthal_get_ccount();
+#ifdef FEATURE_PERFORMANCE_TIMING
+        nowCycles = platform::PlatformTimer::getCycles();
         voiceTimingStats_.recordOscillator(nowCycles - startCycles);
         
         // Timing: Filter envelope
@@ -188,8 +187,8 @@ public:
         // Apply modulation (exponential, upward only)
         float modulatedCutoff = baseCutoff_ * (1.0f + envModulation * 9.0f);  // Up to 10x base cutoff
         
-#ifdef ENABLE_AUDIO_TIMING_STATS
-        nowCycles = xthal_get_ccount();
+#ifdef FEATURE_PERFORMANCE_TIMING
+        nowCycles = platform::PlatformTimer::getCycles();
         voiceTimingStats_.recordFilterEnv(nowCycles - startCycles);
         
         // Timing: Filter setCutoff (coefficient recalculation)
@@ -201,8 +200,8 @@ public:
         // or rate-limiting updates (e.g., update filter every N samples, interpolate between).
         filter_.setCutoff(modulatedCutoff);
         
-#ifdef ENABLE_AUDIO_TIMING_STATS
-        nowCycles = xthal_get_ccount();
+#ifdef FEATURE_PERFORMANCE_TIMING
+        nowCycles = platform::PlatformTimer::getCycles();
         voiceTimingStats_.recordFilterSetCutoff(nowCycles - startCycles);
         
         // Timing: Filter processing
@@ -212,8 +211,8 @@ public:
         // Apply filter
         sample = filter_.processSample(sample);
         
-#ifdef ENABLE_AUDIO_TIMING_STATS
-        nowCycles = xthal_get_ccount();
+#ifdef FEATURE_PERFORMANCE_TIMING
+        nowCycles = platform::PlatformTimer::getCycles();
         voiceTimingStats_.recordFilterProcess(nowCycles - startCycles);
         
         // Timing: Amplitude envelope
@@ -224,8 +223,8 @@ public:
         float ampEnvLevel = ampEnvelope_.nextSample();
         sample *= ampEnvLevel * volume_;
         
-#ifdef ENABLE_AUDIO_TIMING_STATS
-        nowCycles = xthal_get_ccount();
+#ifdef FEATURE_PERFORMANCE_TIMING
+        nowCycles = platform::PlatformTimer::getCycles();
         voiceTimingStats_.recordAmpEnv(nowCycles - startCycles);
 #endif
         
@@ -265,4 +264,3 @@ private:
 
 } // namespace synth
 
-#endif // SAWTOOTH_SYNTH_HPP

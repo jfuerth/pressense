@@ -223,6 +223,89 @@ To add a new optional feature (e.g., USB MIDI):
    #endif
    ```
 
+## Naming Conventions
+
+Follow these naming conventions throughout the codebase:
+
+### Header Guards
+
+Use `#pragma once` for all header files:
+
+```cpp
+#pragma once
+
+// Header content
+```
+
+**Do not use** traditional `#ifndef`/`#define`/`#endif` include guards.
+
+### Identifiers
+
+- **Classes, Structs, Enums**: PascalCase
+  ```cpp
+  class SynthVoiceAllocator { };
+  struct TimingStats { };
+  enum class FilterMode { };
+  ```
+
+- **Functions and Methods**: camelCase
+  ```cpp
+  void processSample(float sample);
+  float nextSample();
+  bool isActive() const;
+  ```
+
+- **Member Variables**: camelCase with trailing underscore
+  ```cpp
+  class MyClass {
+  private:
+      float sampleRate_;
+      int maxVoices_;
+      std::vector<Voice> voices_;
+  };
+  ```
+
+- **Local Variables and Parameters**: camelCase (no underscore)
+  ```cpp
+  void process(float inputSample) {
+      float outputLevel = 0.5f;
+      int voiceCount = getVoiceCount();
+  }
+  ```
+
+- **Constants**: SCREAMING_SNAKE_CASE
+  ```cpp
+  static constexpr int MAX_VOICES = 8;
+  static constexpr float DEFAULT_SAMPLE_RATE = 48000.0f;
+  const int BUFFER_SIZE = 256;
+  ```
+
+- **Namespaces**: lowercase with underscores (if needed)
+  ```cpp
+  namespace midi { }
+  namespace platform { }
+  ```
+
+### No Hungarian Notation
+
+Do not use prefixes to indicate type or scope:
+
+**Avoid:**
+```cpp
+static std::unique_ptr<SynthApplication> gSynth;  // 'g' prefix
+int iCount;                                        // 'i' prefix
+float fLevel;                                      // 'f' prefix
+```
+
+**Prefer:**
+```cpp
+static std::unique_ptr<SynthApplication> synth;
+int count;
+float level;
+```
+
+The type system and modern IDEs provide sufficient type information. Let the code speak for itself.
+
 ## Summary
 
 **Order of Preference:**

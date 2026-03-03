@@ -17,8 +17,8 @@
 #include <clipboard.hpp>
 #endif
 
-#if defined(ESP_PLATFORM) && defined(ENABLE_AUDIO_TIMING_STATS)
-#include <xtensa/hal.h>  // For xthal_get_ccount() - CPU cycle counter
+#ifdef FEATURE_PERFORMANCE_TIMING
+#include <timing.hpp>
 #endif
 
 namespace platform {
@@ -93,11 +93,11 @@ public:
      * @param numFrames Number of frames to render
      */
     void renderAudio(float* buffer, unsigned int numFrames) {
-#ifdef ENABLE_AUDIO_TIMING_STATS
+#ifdef FEATURE_PERFORMANCE_TIMING
         uint32_t startCycles, nowCycles;
         
         // Timing: Voice mixing
-        startCycles = xthal_get_ccount();
+        startCycles = platform::PlatformTimer::getCycles();
 #endif
         
         // Get all voices
@@ -121,8 +121,8 @@ public:
             monoBuffer_[frame] = sample;
         }
         
-#ifdef ENABLE_AUDIO_TIMING_STATS
-        nowCycles = xthal_get_ccount();
+#ifdef FEATURE_PERFORMANCE_TIMING
+        nowCycles = platform::PlatformTimer::getCycles();
         timingVoiceMixing_.record(nowCycles - startCycles);
         
         // Timing: Output processing
@@ -132,8 +132,8 @@ public:
         // Pass 2: Process with output processor
         outputProcessor_.processBuffer(monoBuffer_.data(), numFrames);
         
-#ifdef ENABLE_AUDIO_TIMING_STATS
-        nowCycles = xthal_get_ccount();
+#ifdef FEATURE_PERFORMANCE_TIMING
+        nowCycles = platform::PlatformTimer::getCycles();
         timingOutputProcessing_.record(nowCycles - startCycles);
         
         // Timing: Stereo duplication
@@ -147,8 +147,8 @@ public:
             buffer[frame * channels_ + 1] = processed; // Right
         }
         
-#ifdef ENABLE_AUDIO_TIMING_STATS
-        nowCycles = xthal_get_ccount();
+#ifdef FEATURE_PERFORMANCE_TIMING
+        nowCycles = platform::PlatformTimer::getCycles();
         timingStereoDup_.record(nowCycles - startCycles);
 #endif
     }

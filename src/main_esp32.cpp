@@ -8,29 +8,28 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_timer.h>
-#include <xtensa/hal.h>
 #include <memory>
+
+#ifdef FEATURE_PERFORMANCE_TIMING
+#include <timing.hpp>
+#endif
 
 // Platform-specific implementations
 #include <embedded_program_storage.hpp>
 
-// CPU frequency for cycle-to-microsecond conversion
-// ESP32 @ 240MHz = 240 cycles per microsecond
-static constexpr uint32_t CYCLES_PER_MICROSECOND = 240;
-
 // Global instances
-static std::unique_ptr<platform::SynthApplication> gSynth;
-static std::unique_ptr<esp32::ESP32CapacitiveScanner> gScanner;
-static std::unique_ptr<midi::MidiKeyboardController> gKeyboard;
-static std::unique_ptr<esp32::I2sAudioSink> gAudioSink;
-static std::unique_ptr<esp32::Esp32TelemetrySink<platform::AudioStats>> gAudioTelemetry;
+static std::unique_ptr<platform::SynthApplication> synthApp;
+static std::unique_ptr<esp32::ESP32CapacitiveScanner> scanner;
+static std::unique_ptr<midi::MidiKeyboardController> keyboard;
+static std::unique_ptr<esp32::I2sAudioSink> audioSink;
+static std::unique_ptr<esp32::Esp32TelemetrySink<platform::AudioStats>> audioTelemetry;
 
 /**
  * @brief Audio rendering task - pinned to core 1 for dedicated audio processing
  */
 void audioTask(void* parameter) {
-    unsigned int actualSampleRate = gAudioSink->getSampleRate();
-    const unsigned int BUFFER_FRAMES = gAudioSink->getBufferFrames();
+    unsigned int actualSampleRate = audioSink->getSampleRate();
+    const unsigned int BUFFER_FRAMES = audioSink->getBufferFrames();
     
     // Timing statistics
     uint32_t frameCount = 0;
@@ -45,15 +44,15 @@ void audioTask(void* parameter) {
         uint32_t startTime = esp_timer_get_time();  // microseconds
         
         // Process keyboard scan (called from audio loop, scanner runs in separate task)
-        gKeyboard->processScan();
+        keyboard->processScan();
         uint32_t now = esp_timer_get_time();
         uint32_t keyProcessingTime = now - startTime;
         startTime = now;
 
         // Fill and write audio buffer
-        gAudioSink->write([&](float* buffer, unsigned int numFrames) {
+        audioSink->write([&](float* buffer, unsigned int numFrames) {
             // Render audio
-            gSynth->renderAudio(buffer, numFrames);
+            synthApp->renderAudio(buffer, numFrames);
         });
         now = esp_timer_get_time();
         uint32_t renderTime = now - startTime;
@@ -79,46 +78,48 @@ void audioTask(void* parameter) {
             stats.bufferDuration = bufferDuration;
             stats.avgScanTime = totalScanTime / 1000;
             stats.avgRenderTime = totalRenderTime / 1000;
-            stats.underrunCount = gAudioSink->getUnderrunCount();
-            stats.partialWriteCount = gAudioSink->getPartialWriteCount();
+            stats.underrunCount = audioSink->getUnderrunCount();
+            stats.partialWriteCount = audioSink->getPartialWriteCount();
             stats.coreId = xPortGetCoreID();
             
-#ifdef ENABLE_AUDIO_TIMING_STATS
+#ifdef FEATURE_PERFORMANCE_TIMING
             // Collect detailed timing breakdown
             platform::TimingStats voiceMixing, outputProcessing, stereoDup;
-            gSynth->getAndResetTimingStats(voiceMixing, outputProcessing, stereoDup);
+            synthApp->getAndResetTimingStats(voiceMixing, outputProcessing, stereoDup);
             
             platform::TimingStats floatToInt, i2sWrite;
-            gAudioSink->getAndResetTimingStats(floatToInt, i2sWrite);
+            audioSink->getAndResetTimingStats(floatToInt, i2sWrite);
             
-            platform::VoiceTimingStats voiceComponents = gSynth->getAndResetVoiceTimingStats();
+            platform::VoiceTimingStats voiceComponents = synthApp->getAndResetVoiceTimingStats();
             
             // Populate timing breakdown (convert cycles to microseconds)
-            stats.timing.avgVoiceMixing = voiceMixing.getAverage() / CYCLES_PER_MICROSECOND;
-            stats.timing.minVoiceMixing = voiceMixing.minTime / CYCLES_PER_MICROSECOND;
-            stats.timing.maxVoiceMixing = voiceMixing.maxTime / CYCLES_PER_MICROSECOND;
+            constexpr uint32_t cyclesPerUs = platform::PlatformTimer::cyclesPerMicrosecond;
             
-            stats.timing.avgOutputProcessing = outputProcessing.getAverage() / CYCLES_PER_MICROSECOND;
-            stats.timing.minOutputProcessing = outputProcessing.minTime / CYCLES_PER_MICROSECOND;
-            stats.timing.maxOutputProcessing = outputProcessing.maxTime / CYCLES_PER_MICROSECOND;
+            stats.timing.avgVoiceMixing = voiceMixing.getAverage() / cyclesPerUs;
+            stats.timing.minVoiceMixing = voiceMixing.minTime / cyclesPerUs;
+            stats.timing.maxVoiceMixing = voiceMixing.maxTime / cyclesPerUs;
             
-            stats.timing.avgStereoDup = stereoDup.getAverage() / CYCLES_PER_MICROSECOND;
-            stats.timing.minStereoDup = stereoDup.minTime / CYCLES_PER_MICROSECOND;
-            stats.timing.maxStereoDup = stereoDup.maxTime / CYCLES_PER_MICROSECOND;
+            stats.timing.avgOutputProcessing = outputProcessing.getAverage() / cyclesPerUs;
+            stats.timing.minOutputProcessing = outputProcessing.minTime / cyclesPerUs;
+            stats.timing.maxOutputProcessing = outputProcessing.maxTime / cyclesPerUs;
             
-            stats.timing.avgFloatToInt = floatToInt.getAverage() / CYCLES_PER_MICROSECOND;
-            stats.timing.minFloatToInt = floatToInt.minTime / CYCLES_PER_MICROSECOND;
-            stats.timing.maxFloatToInt = floatToInt.maxTime / CYCLES_PER_MICROSECOND;
+            stats.timing.avgStereoDup = stereoDup.getAverage() / cyclesPerUs;
+            stats.timing.minStereoDup = stereoDup.minTime / cyclesPerUs;
+            stats.timing.maxStereoDup = stereoDup.maxTime / cyclesPerUs;
             
-            stats.timing.avgI2sWrite = i2sWrite.getAverage() / CYCLES_PER_MICROSECOND;
-            stats.timing.minI2sWrite = i2sWrite.minTime / CYCLES_PER_MICROSECOND;
-            stats.timing.maxI2sWrite = i2sWrite.maxTime / CYCLES_PER_MICROSECOND;
+            stats.timing.avgFloatToInt = floatToInt.getAverage() / cyclesPerUs;
+            stats.timing.minFloatToInt = floatToInt.minTime / cyclesPerUs;
+            stats.timing.maxFloatToInt = floatToInt.maxTime / cyclesPerUs;
+            
+            stats.timing.avgI2sWrite = i2sWrite.getAverage() / cyclesPerUs;
+            stats.timing.minI2sWrite = i2sWrite.minTime / cyclesPerUs;
+            stats.timing.maxI2sWrite = i2sWrite.maxTime / cyclesPerUs;
             
             // Convert voice component timing from cycles to microseconds
-            stats.timing.voiceComponents = voiceComponents.convertToMicroseconds(CYCLES_PER_MICROSECOND);
+            stats.timing.voiceComponents = voiceComponents.convertToMicroseconds(cyclesPerUs);
 #endif
             
-            gAudioTelemetry->sendTelemetry(stats);
+            audioTelemetry->sendTelemetry(stats);
             
             maxRenderTime = 0;
             totalScanTime = 0;
@@ -139,31 +140,31 @@ extern "C" void app_main(void) {
     
     // Create I2S audio output first to determine actual sample rate
     logInfo("Initializing I2S audio output...");
-    gAudioSink = std::make_unique<esp32::I2sAudioSink>(REQUESTED_SAMPLE_RATE, CHANNELS, BUFFER_FRAMES);
+    audioSink = std::make_unique<esp32::I2sAudioSink>(REQUESTED_SAMPLE_RATE, CHANNELS, BUFFER_FRAMES);
     
     // Get the actual achieved sample rate from the I2S hardware
-    unsigned int actualSampleRate = gAudioSink->getSampleRate();
+    unsigned int actualSampleRate = audioSink->getSampleRate();
     logInfo("Audio: %d Hz, %d channels, %d frames/buffer",
            actualSampleRate, 
-           gAudioSink->getChannels(), 
-           gAudioSink->getBufferFrames());
+           audioSink->getChannels(), 
+           audioSink->getBufferFrames());
     
     // Create synthesizer application with the ACTUAL sample rate
     logInfo("Initializing synthesizer...");
     auto programStorage = std::make_unique<esp32::EmbeddedProgramStorage>();
-    gSynth = std::make_unique<platform::SynthApplication>(actualSampleRate, CHANNELS, MAX_VOICES, std::move(programStorage));
+    synthApp = std::make_unique<platform::SynthApplication>(actualSampleRate, CHANNELS, MAX_VOICES, std::move(programStorage));
         
     // Start capacitive touch keyboard
     logInfo("Starting capacitive keyboard scanner...");
-    gScanner = std::make_unique<esp32::ESP32CapacitiveScanner>();
+    scanner = std::make_unique<esp32::ESP32CapacitiveScanner>();
     
     logInfo("Initializing MIDI keyboard controller...");
     auto keyScanTelemetry = std::make_unique<esp32::Esp32TelemetrySink<midi::KeyScanStats>>("keyscan_telem", 0);
-    gKeyboard = std::make_unique<midi::MidiKeyboardController>(
-        *gScanner,
+    keyboard = std::make_unique<midi::MidiKeyboardController>(
+        *scanner,
         [](uint8_t byte) {
-            if (gSynth) {
-                gSynth->processMidiByte(byte);
+            if (synthApp) {
+                synthApp->processMidiByte(byte);
             }
         },
         std::move(keyScanTelemetry),
@@ -172,11 +173,11 @@ extern "C" void app_main(void) {
     );
     
     // Enable telemetry output
-    gKeyboard->setTelemetryEnabled(true);
+    keyboard->setTelemetryEnabled(true);
     
     // Create audio telemetry sink
     logInfo("Initializing audio telemetry...");
-    gAudioTelemetry = std::make_unique<esp32::Esp32TelemetrySink<platform::AudioStats>>("audio_telem", 0);
+    audioTelemetry = std::make_unique<esp32::Esp32TelemetrySink<platform::AudioStats>>("audio_telem", 0);
     
     logInfo("\nCreating audio task on core 1...");
     

@@ -1,5 +1,4 @@
-#ifndef SYNTH_VOICE_ALLOCATOR_H
-#define SYNTH_VOICE_ALLOCATOR_H
+#pragma once
 
 #include "synth.hpp"
 #include <cstdint>
@@ -7,64 +6,62 @@
 
 namespace midi {
 
-  /**
-   * @brief Abstract base class for managing allocation of synthesizer voices for MIDI notes
-   * 
-   * This class provides the interface for mapping between MIDI notes and available
-   * synthesizer voices, ensuring efficient voice allocation for polyphonic synthesis.
-   * This class owns the synthesizer instances it manages.
-   */
-  class SynthVoiceAllocator {
+/**
+ * @brief Abstract base class for managing allocation of synthesizer voices for MIDI notes
+ *
+ * This class provides the interface for mapping between MIDI notes and available
+ * synthesizer voices, ensuring efficient voice allocation for polyphonic synthesis.
+ * This class owns the synthesizer instances it manages.
+ */
+class SynthVoiceAllocator {
   public:
     /**
      * @brief Default constructor
      */
-    SynthVoiceAllocator(uint8_t maxVoices) : maxVoices(maxVoices) {
+    SynthVoiceAllocator(uint8_t maxVoices_) : maxVoices_(maxVoices_) {
         // Initialize voice allocation data structures
     }
 
     virtual ~SynthVoiceAllocator() = default;
-    SynthVoiceAllocator(const SynthVoiceAllocator&) = delete;
-    SynthVoiceAllocator& operator=(const SynthVoiceAllocator&) = delete;
-    SynthVoiceAllocator(SynthVoiceAllocator&&) = default;
-    SynthVoiceAllocator& operator=(SynthVoiceAllocator&&) = default;
-    
+    SynthVoiceAllocator(const SynthVoiceAllocator &) = delete;
+    SynthVoiceAllocator &operator=(const SynthVoiceAllocator &) = delete;
+    SynthVoiceAllocator(SynthVoiceAllocator &&) = default;
+    SynthVoiceAllocator &operator=(SynthVoiceAllocator &&) = default;
+
     /**
      * @brief Retrieve the current voice assigned to the note, or allocate a new one
      * @param midiNote The MIDI note number (0-127)
      * @return The voice for the note.
-     * 
+     *
      * If there are not enough voices available, a previously allocated voice will be reassigned.
      * This method should never fail and always return a valid voice.
      */
-    virtual Synth& allocate(uint8_t midiNote) = 0;
-    
+    virtual Synth &allocate(uint8_t midiNote) = 0;
+
     /**
      * @brief Get the voice currently assigned to a specific MIDI note, if any
-     * @param midiNote The MIDI note number (0-127) 
+     * @param midiNote The MIDI note number (0-127)
      * @return Pointer to the voice if currently assigned to this note, nullptr otherwise
-     * 
+     *
      * This method only returns a voice if it's currently allocated to the specified note.
      * Does not allocate a new voice or steal an existing voice from another note.
      * This is essential for updating existing voices with pitch bends, aftertouch, and
      * even note-off events to avoid stealing voices that were already reassigned to
      * different notes.
      */
-    virtual Synth* findAllocated(uint8_t midiNote) = 0;
-    
+    virtual Synth *findAllocated(uint8_t midiNote) = 0;
+
     /**
      * @brief Apply a function to each voice managed by this allocator
      * @param func Function to apply to each voice
-     * 
+     *
      * This allows operations like pitch bend to be applied to all voices
      * without exposing the internal voice management structure.
      */
-    virtual void forEachVoice(std::function<void(Synth&)> func) = 0;
-    
+    virtual void forEachVoice(std::function<void(Synth &)> func) = 0;
+
   private:
-    uint8_t maxVoices;
-  };
+    uint8_t maxVoices_;
+};
 
 } // namespace midi
-
-#endif // SYNTH_VOICE_ALLOCATOR_H

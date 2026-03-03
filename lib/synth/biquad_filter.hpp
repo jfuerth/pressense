@@ -1,5 +1,4 @@
-#ifndef BIQUAD_FILTER_HPP
-#define BIQUAD_FILTER_HPP
+#pragma once
 
 #include <math.h>  // Use C math.h for single-precision cosf/sinf
 
@@ -233,5 +232,3 @@ private:
 };
 
 } // namespace synth
-
-#endif // BIQUAD_FILTER_HPP

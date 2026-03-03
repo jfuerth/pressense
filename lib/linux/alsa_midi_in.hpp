@@ -1,5 +1,4 @@
-#ifndef ALSA_MIDI_IN_HPP
-#define ALSA_MIDI_IN_HPP
+#pragma once
 
 #include <alsa/asoundlib.h>
 #include <string>
@@ -190,4 +189,3 @@ private:
 
 } // namespace linux
 
-#endif // ALSA_MIDI_IN_HPP

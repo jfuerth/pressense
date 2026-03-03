@@ -6,8 +6,8 @@
 #include <log.hpp>
 #include <timing_stats.hpp>
 
-#ifdef ENABLE_AUDIO_TIMING_STATS
-#include <xtensa/hal.h>  // For xthal_get_ccount() - CPU cycle counter
+#ifdef FEATURE_PERFORMANCE_TIMING
+#include <timing.hpp>
 #endif
 
 namespace esp32 {
@@ -125,16 +125,16 @@ public:
      */
     template<typename Callback>
     void write(Callback fillCallback) {
-#ifdef ENABLE_AUDIO_TIMING_STATS
+#ifdef FEATURE_PERFORMANCE_TIMING
         uint32_t startCycles, nowCycles;
 #endif
         
         // Fill buffer with audio data (float format)
         fillCallback(buffer_.data(), bufferFrames_);
         
-#ifdef ENABLE_AUDIO_TIMING_STATS
+#ifdef FEATURE_PERFORMANCE_TIMING
         // Timing: Float-to-int conversion
-        startCycles = xthal_get_ccount();
+        startCycles = platform::PlatformTimer::getCycles();
 #endif
         
         // Convert float to 32-bit integer for I2S
@@ -154,8 +154,8 @@ public:
             i2sBuffer_[i] = sample24 << 8;
         }
         
-#ifdef ENABLE_AUDIO_TIMING_STATS
-        nowCycles = xthal_get_ccount();
+#ifdef FEATURE_PERFORMANCE_TIMING
+        nowCycles = platform::PlatformTimer::getCycles();
         timingFloatToInt_.record(nowCycles - startCycles);
         
         // Timing: I2S write
@@ -169,8 +169,8 @@ public:
                                   bytesToWrite,
                                   &bytesWritten, portMAX_DELAY);
         
-#ifdef ENABLE_AUDIO_TIMING_STATS
-        nowCycles = xthal_get_ccount();
+#ifdef FEATURE_PERFORMANCE_TIMING
+        nowCycles = platform::PlatformTimer::getCycles();
         timingI2sWrite_.record(nowCycles - startCycles);
 #endif
         

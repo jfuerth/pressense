@@ -1,5 +1,4 @@
-#ifndef LINUX_AUDIO_SINK_HPP
-#define LINUX_AUDIO_SINK_HPP
+#pragma once
 
 #include <alsa/asoundlib.h>
 #include <vector>
@@ -107,4 +106,3 @@ private:
 
 } // namespace linux
 
-#endif // LINUX_AUDIO_SINK_HPP
