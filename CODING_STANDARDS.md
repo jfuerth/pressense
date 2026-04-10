@@ -306,6 +306,60 @@ float level;
 
 The type system and modern IDEs provide sufficient type information. Let the code speak for itself.
 
+## Platform Isolation
+
+### Keep Platform Code Separate
+
+**Golden Rule:** Adding or removing platform support should involve adding or removing entire directories or files, not editing individual shared files.
+
+When implementing platform-specific functionality:
+
+1. **Put implementation in platform directories:**
+   ```
+   lib/esp32/esp32_timing.hpp      # ESP32-specific implementation
+   lib/linux/linux_timing.hpp      # Linux-specific implementation
+   lib/rp2350/rp2350_timing.hpp    # Future platform - just add file
+   ```
+
+2. **Use minimal forwarding headers in lib/platform/:**
+   ```cpp
+   // lib/platform/timing.hpp - ONLY includes + type alias
+   #pragma once
+   
+   #if defined(ESP_PLATFORM)
+   #include <esp32_timing.hpp>
+   namespace platform {
+       using PlatformTimer = esp32::Esp32CycleTimer;
+   }
+   #else
+   #include <linux_timing.hpp>
+   namespace platform {
+       using PlatformTimer = linux::LinuxTscTimer;
+   }
+   #endif
+   ```
+
+3. **Benefits of this approach:**
+   - Adding RP2350 support = add `lib/rp2350/` directory
+   - Removing ESP32 support = delete `lib/esp32/` directory
+   - No surgery to individual files
+   - Clear separation of platform concerns
+   - Build system automatically includes only relevant files
+
+**Anti-pattern - Avoid This:**
+```cpp
+// DON'T mix multiple platform implementations in one file
+#if defined(ESP_PLATFORM)
+    // 50 lines of ESP32 code
+#elif defined(__x86_64__)
+    // 50 lines of Linux code
+#elif defined(RP2350)
+    // 50 lines of RP2350 code
+#endif
+```
+
+This anti-pattern makes the file grow with each platform, creates merge conflicts, and makes it hard to cleanly add/remove platforms.
+
 ## Summary
 
 **Order of Preference:**

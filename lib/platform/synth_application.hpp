@@ -41,6 +41,9 @@ public:
         , outputProcessor_(0.5f, static_cast<float>(sampleRate))
         , currentProgram_(1)
         , programStorage_(std::move(programStorage))
+#ifdef FEATURE_PERFORMANCE_TIMING
+        , platformTimer_()  // Capture CPU frequency at construction
+#endif
         {
         
         logInfo("Initializing synthesizer: %d Hz, %d voices", sampleRate_, maxVoices_);
@@ -94,10 +97,7 @@ public:
      */
     void renderAudio(float* buffer, unsigned int numFrames) {
 #ifdef FEATURE_PERFORMANCE_TIMING
-        uint32_t startCycles, nowCycles;
-        
-        // Timing: Voice mixing
-        startCycles = platform::PlatformTimer::getCycles();
+        platform::IntervalTimer<> timer;
 #endif
         
         // Get all voices
@@ -122,37 +122,27 @@ public:
         }
         
 #ifdef FEATURE_PERFORMANCE_TIMING
-        nowCycles = platform::PlatformTimer::getCycles();
-        timingVoiceMixing_.record(nowCycles - startCycles);
-        
-        // Timing: Output processing
-        startCycles = nowCycles;
+        timingVoiceMixing_.record(timer.elapsed());
 #endif
         
         // Pass 2: Process with output processor
         outputProcessor_.processBuffer(monoBuffer_.data(), numFrames);
         
 #ifdef FEATURE_PERFORMANCE_TIMING
-        nowCycles = platform::PlatformTimer::getCycles();
-        timingOutputProcessing_.record(nowCycles - startCycles);
-        
-        // Timing: Stereo duplication
-        startCycles = nowCycles;
+        timingOutputProcessing_.record(timer.elapsed());
 #endif
         
-        // Pass 3: Duplicate processed mono to stereo
-        for (unsigned int frame = 0; frame < numFrames; ++frame) {
+        for (u_int32_t frame = 0; frame < numFrames; ++frame) {
             float processed = monoBuffer_[frame];
             buffer[frame * channels_ + 0] = processed; // Left
             buffer[frame * channels_ + 1] = processed; // Right
         }
         
 #ifdef FEATURE_PERFORMANCE_TIMING
-        nowCycles = platform::PlatformTimer::getCycles();
-        timingStereoDup_.record(nowCycles - startCycles);
+        timingStereoDup_.record(timer.elapsed());
 #endif
     }
-    
+
     /**
      * @brief Get timing statistics and reset counters
      * @param outVoiceMixing Voice mixing timing stats
@@ -329,13 +319,12 @@ private:
     
     std::unique_ptr<features::ProgramStorage> programStorage_;
     
-    // Timing statistics (ESP32 only)
     TimingStats timingVoiceMixing_;
     TimingStats timingOutputProcessing_;
     TimingStats timingStereoDup_;
 
-#ifdef FEATURE_CLIPBOARD
-    std::unique_ptr<features::Clipboard> clipboard_;
+#ifdef FEATURE_PERFORMANCE_TIMING
+    platform::PlatformTimer platformTimer_;  // Captures CPU frequency at construction
 #endif
 };
 

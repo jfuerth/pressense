@@ -24,6 +24,11 @@ static std::unique_ptr<midi::MidiKeyboardController> keyboard;
 static std::unique_ptr<esp32::I2sAudioSink> audioSink;
 static std::unique_ptr<esp32::Esp32TelemetrySink<platform::AudioStats>> audioTelemetry;
 
+#ifdef FEATURE_PERFORMANCE_TIMING
+// Timer instance for cycle-to-microsecond conversion (captures CPU freq at init)
+static platform::PlatformTimer performanceTimer;
+#endif
+
 /**
  * @brief Audio rendering task - pinned to core 1 for dedicated audio processing
  */
@@ -93,7 +98,7 @@ void audioTask(void* parameter) {
             platform::VoiceTimingStats voiceComponents = synthApp->getAndResetVoiceTimingStats();
             
             // Populate timing breakdown (convert cycles to microseconds)
-            constexpr uint32_t cyclesPerUs = platform::PlatformTimer::cyclesPerMicrosecond;
+            const uint32_t cyclesPerUs = performanceTimer.cyclesPerMicrosecond;
             
             stats.timing.avgVoiceMixing = voiceMixing.getAverage() / cyclesPerUs;
             stats.timing.minVoiceMixing = voiceMixing.minTime / cyclesPerUs;
