@@ -1,0 +1,44 @@
+;
+; Capacitive Touch Sensing PIO Program for RP2040/2350 PIO
+;
+; This program measures the charging time of a capacitive touch sensor
+; by pulling the pin low briefly, then switching to input and counting
+; cycles until the pin reads high (charged by the pull-up resistor).
+;
+; When a finger touches the electrode, capacitance increases, which
+; increases the charging time and thus the cycle count.
+;
+
+.program capacitive_touch
+
+.side_set 0 opt  ; No side-set pins allows full 5-bit delay
+
+    ; Initialize counter - start at max and count down
+    ; CPU will calculate: actual_count = 0xFFFFFFFF - reading
+    mov x, ~NULL            ; x = 0xFFFFFFFF
+    ;set x, 0x1f ; short timeout for debugging
+
+    set y, 8                ; Number of times to sample the pin, accumulating the results in x
+
+read_key:
+    ; Pull the pin low to discharge the capacitor, then wait 10 us
+    set pindirs, 1          ; Set pin to output mode
+    set pins, 0 [15]        ; Drive pin low and delay until discharged
+    
+    ; Now switch pin to input mode and count cycles until it reads high
+    set pindirs, 0          ; Set pin to input mode
+    set pins, 1             ; Set output register to 1 (for proper high-Z behavior)
+    
+test_pin:
+    jmp pin next_read       ; If pin is high, we're done counting for this cycle
+    jmp x-- test_pin        ; Otherwise continue counting
+
+next_read:
+    jmp y-- read_key
+
+push_and_halt:
+    mov isr, x              ; Move remaining count to ISR
+    push                    ; Push to input FIFO for pickup by CPU or DMA
+    
+PUBLIC wait_for_restart:
+    jmp wait_for_restart

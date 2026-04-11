@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/schema/library.json",
+  "name": "rp2350",
+  "version": "1.0.0",
+  "description": "RP2350 platform-specific implementations for Pressence Synth",
+  "keywords": "rp2350, raspberrypi, pio, capacitive",
+  "platforms": "https://github.com/maxgerhardt/platform-raspberrypi.git",
+  "frameworks": "picosdk",
+  "build": {
+    "libArchive": false,
+    "srcFilter": [
+      "+<*.c>",
+      "+<*.cpp>",
+      "+<*.pio>"
+    ]
+  }
+}
