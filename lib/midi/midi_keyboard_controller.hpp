@@ -19,7 +19,7 @@ namespace midi {
  * for visualization and analysis.
  */
 struct KeyScanStats {
-    static constexpr uint8_t MAX_KEYS = 16;
+    static constexpr uint8_t MAX_KEYS = 32;
     
     uint8_t keyCount;
     uint16_t readings[MAX_KEYS];

@@ -3,6 +3,7 @@
 #include <key_scanner.hpp>
 #include <cstdio>
 #include <cstdlib>
+#include <algorithm>
 #include "pico/stdlib.h"
 #include "hardware/dma.h"
 #include "hardware/pio.h"
@@ -165,10 +166,9 @@ public:
      * Convert to uint16_t for interface compatibility.
      */
     const uint16_t* getScanReadings() const override {
-        // Convert from 32-bit raw readings to 16-bit for interface
-        // Take upper 16 bits for better resolution
+        // Convert from 32-bit inverted raw readings to 16-bit (clamped) for interface
         for (uint8_t i = 0; i < NUM_KEYS; i++) {
-            readings16_[i] = static_cast<uint16_t>((rawReadings_[i] >> 16) & 0xFFFF);
+            readings16_[i] = static_cast<uint16_t>(std::min(0xFFFFFFFF - rawReadings_[i], 0xFFFFul));
         }
         return readings16_;
     }

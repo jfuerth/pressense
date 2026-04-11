@@ -10,38 +10,30 @@
 #include "pico/multicore.h"
 #include "hardware/clocks.h"
 
-// Platform-specific implementation
+// Platform-specific implementations
 #include <pio_capacitive_scanner.hpp>
+#include <rp2350_telemetry_sink.hpp>
+
+// Platform-agnostic MIDI logic
+#include <midi_keyboard_controller.hpp>
 
 // Global instances
 static rp2350::PioCapacitiveScanner* scanner = nullptr;
+static midi::MidiKeyboardController* keyboard = nullptr;
 
 /**
- * @brief Print key telemetry to USB serial
+ * @brief Dummy MIDI callback (not used yet - will add USB MIDI later)
  */
-void printKeyTelemetry() {
-    const uint32_t* rawReadings = scanner->getRawReadings();
-    const uint8_t keyCount = scanner->getKeyCount();
-    
-    printf("Keys: ");
-    for (uint8_t i = 0; i < keyCount; i++) {
-        // Convert from countdown timer to actual count
-        uint32_t count = 0xFFFFFFFF - rawReadings[i];
-        printf("K%02d:%6lu  ", i, count);
-        
-        // New line every 8 keys for readability
-        if ((i + 1) % 8 == 0 && i < keyCount - 1) {
-            printf("\n      ");
-        }
-    }
-    printf("\n");
+void midiCallback(uint8_t midiByte) {
+    // TODO: Implement USB MIDI output
+    (void)midiByte;
 }
 
 /**
- * @brief Main telemetry loop (runs on core 1)
+ * @brief Main scan loop (runs on core 1)
  */
-void core1_telemetry_loop() {
-    printf("Core 1: Telemetry loop started\n");
+void core1_scan_loop() {
+    printf("Core 1: Scan loop started\n");
     
     while (true) {
         // Trigger a scan
@@ -50,8 +42,8 @@ void core1_telemetry_loop() {
         // Wait for scan to complete
         scanner->waitForScanComplete();
         
-        // Print telemetry
-        printKeyTelemetry();
+        // Process scan results and generate telemetry
+        keyboard->processScan();
         
         // Scan at ~10 Hz
         sleep_ms(100);
@@ -84,11 +76,32 @@ int main() {
     }
     
     printf("Scanner initialized with %d keys\n", scanner->getKeyCount());
-    printf("\n");
     
-    // Launch telemetry loop on core 1
-    printf("Launching telemetry loop on core 1...\n");
-    multicore_launch_core1(core1_telemetry_loop);
+    // Initialize MIDI keyboard controller with telemetry
+    printf("Initializing MIDI keyboard controller...\n");
+    auto telemetrySink = std::make_unique<rp2350::Rp2350TelemetrySink<midi::KeyScanStats>>();
+    keyboard = new midi::MidiKeyboardController(
+        *scanner,
+        midiCallback,
+        std::move(telemetrySink),
+        60,  // Base note C4
+        64   // Fixed velocity
+    );
+    
+    if (!keyboard) {
+        printf("ERROR: Failed to create keyboard controller!\n");
+        return 1;
+    }
+    
+    // Enable telemetry output
+    keyboard->setTelemetryEnabled(true);
+    
+    printf("Keyboard controller initialized\n");
+    printf("Calibrating... (this takes a few seconds)\n\n");
+    
+    // Launch scan loop on core 1
+    printf("Launching scan loop on core 1...\n");
+    multicore_launch_core1(core1_scan_loop);
     
     printf("Core 0: Idle loop started\n");
     printf("========================================\n\n");
