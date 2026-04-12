@@ -31,6 +31,13 @@ source ~/.platformio/penv/bin/activate
 pio test -e esp32dev
 ```
 
+To run the common + RP2350 tests (requires an RP2350B connected via USB):
+
+```
+source ~/.platformio/penv/bin/activate
+pio test -e waveshare_2350b
+```
+
 Especially When running the native tests, just run the whole suite. It only takes a second or two
 and it's faster than running one group of tests at a time.
 

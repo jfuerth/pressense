@@ -438,6 +438,28 @@ void app_main() {
 }
 #endif
 
+#ifdef PLATFORM_RP2350
+#include <pico/stdlib.h>
+int main() {
+    stdio_init_all();
+    
+    // Wait until the USB serial port is connected by a host terminal
+    while (!stdio_usb_connected()) {
+        sleep_ms(100);
+    }
+    
+    RUN_UNITY_TESTS();
+    
+    // Don't return from main, because anything buffered on stdout will be lost.
+    // If we loop here, PlatformIO will eventually see that the tests finished and move to next test
+    while (true) {
+        tight_loop_contents();
+    }
+    
+    return 0;
+}
+#endif
+
 #ifdef PLATFORM_NATIVE
 int main(int argc, char **argv) {
     RUN_UNITY_TESTS();
