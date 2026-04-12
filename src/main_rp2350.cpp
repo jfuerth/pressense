@@ -45,8 +45,8 @@ void core1_scan_loop() {
         // Process scan results and generate telemetry
         keyboard->processScan();
         
-        // Scan at ~10 Hz
-        sleep_ms(100);
+        // Scan at ~100 Hz
+        sleep_ms(10);
     }
 }
 

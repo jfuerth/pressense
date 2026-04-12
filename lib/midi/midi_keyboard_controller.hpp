@@ -68,7 +68,7 @@ inline void to_json(nlohmann::json& j, const KeyScanStats& s) {
  */
 class MidiKeyboardController {
 public:
-    static constexpr uint16_t CALIBRATION_SCANS = 1000;
+    static constexpr uint16_t CALIBRATION_SCANS = 10;
     static constexpr float NOTE_ON_THRESHOLD = 2.0f;    // Ratio above baseline for note on
     static constexpr float NOTE_OFF_THRESHOLD = 1.5f;   // Ratio above baseline for note off (hysteresis)
     static constexpr float MAX_PRESSURE_RATIO = 40.0f;   // Ratio for maximum aftertouch pressure
