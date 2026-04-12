@@ -17,10 +17,35 @@
 // Platform-specific implementations
 #include <embedded_program_storage.hpp>
 
+// Keyboard configuration: GPIO pins for 14 keys (avoiding I2S pins 22, 25, 26 and boot/flash pins)
+static constexpr gpio_num_t KEY_GPIOS[] = {
+    GPIO_NUM_4,
+    GPIO_NUM_12,
+    GPIO_NUM_13,
+    GPIO_NUM_14,
+    GPIO_NUM_15,
+    GPIO_NUM_16,  // Labelled RX2 on DEVKIT V1
+    GPIO_NUM_17,  // Labelled TX2 on DEVKIT V1
+    GPIO_NUM_18,
+    GPIO_NUM_19,
+    GPIO_NUM_21,
+    GPIO_NUM_23,
+    GPIO_NUM_27,
+    GPIO_NUM_32,
+    GPIO_NUM_33
+};
+static constexpr size_t NUM_KEYS = sizeof(KEY_GPIOS) / sizeof(KEY_GPIOS[0]);
+
+// Scanner is templated so compiler can optimize code for actual key count
+using ScannerType = esp32::ESP32CapacitiveScanner<KEY_GPIOS, NUM_KEYS>;
+
+// MIDI controller type with compile-time configuration
+using MidiControllerType = midi::MidiKeyboardController<NUM_KEYS>;
+
 // Global instances
 static std::unique_ptr<platform::SynthApplication> synthApp;
-static std::unique_ptr<esp32::ESP32CapacitiveScanner> scanner;
-static std::unique_ptr<midi::MidiKeyboardController> keyboard;
+static std::unique_ptr<ScannerType> scanner;
+static std::unique_ptr<MidiControllerType> keyboard;
 static std::unique_ptr<esp32::I2sAudioSink> audioSink;
 static std::unique_ptr<esp32::Esp32TelemetrySink<platform::AudioStats>> audioTelemetry;
 
@@ -161,11 +186,11 @@ extern "C" void app_main(void) {
         
     // Start capacitive touch keyboard
     logInfo("Starting capacitive keyboard scanner...");
-    scanner = std::make_unique<esp32::ESP32CapacitiveScanner>();
+    scanner = std::make_unique<ScannerType>();
     
     logInfo("Initializing MIDI keyboard controller...");
-    auto keyScanTelemetry = std::make_unique<esp32::Esp32TelemetrySink<midi::KeyScanStats>>("keyscan_telem", 0);
-    keyboard = std::make_unique<midi::MidiKeyboardController>(
+    auto keyScanTelemetry = std::make_unique<esp32::Esp32TelemetrySink<midi::KeyScanStats<NUM_KEYS>>>("keyscan_telem", 0);
+    keyboard = std::make_unique<MidiControllerType>(
         *scanner,
         [](uint8_t byte) {
             if (synthApp) {

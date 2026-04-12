@@ -17,30 +17,49 @@ namespace midi {
  * 
  * Contains per-key readings, baselines, ratios, and state information
  * for visualization and analysis.
+ * 
+ * Template parameter allows compile-time optimization with stack arrays.
+ * 
+ * @tparam NumKeys Number of keys to hold stats for
  */
+template<uint8_t NumKeys>
 struct KeyScanStats {
-    static constexpr uint8_t MAX_KEYS = 32;
+    static constexpr uint8_t keyCount = NumKeys;
+    uint16_t readings[NumKeys];
+    float baselines[NumKeys];
+    float ratios[NumKeys];
+    bool noteStates[NumKeys];
+    uint8_t aftertouchValues[NumKeys];
     
-    uint8_t keyCount;
-    uint16_t readings[MAX_KEYS];
-    float baselines[MAX_KEYS];
-    float ratios[MAX_KEYS];
-    bool noteStates[MAX_KEYS];
-    uint8_t aftertouchValues[MAX_KEYS];
-    
-    // Thresholds (same for all keys)
+    // Threshold ratios (multiple of each key's baseline) for note on/off detection
     float noteOnThreshold;
     float noteOffThreshold;
     
     // Calibration state
     bool isCalibrated;
     uint16_t calibrationCount;
+    
+    /**
+     * @brief Default constructor - initializes all arrays to zero
+     */
+    KeyScanStats()
+        : readings{}
+        , baselines{}
+        , ratios{}
+        , noteStates{}
+        , aftertouchValues{}
+        , noteOnThreshold(0.0f)
+        , noteOffThreshold(0.0f)
+        , isCalibrated(false)
+        , calibrationCount(0)
+    {}
 };
 
 /**
  * @brief JSON serialization for KeyScanStats
  */
-inline void to_json(nlohmann::json& j, const KeyScanStats& s) {
+template<uint8_t NumKeys>
+inline void to_json(nlohmann::json& j, const KeyScanStats<NumKeys>& s) {
     j = nlohmann::json{
         {"type", "keyScan"},
         {"keyCount", s.keyCount},
@@ -48,11 +67,11 @@ inline void to_json(nlohmann::json& j, const KeyScanStats& s) {
         {"calibrationCount", s.calibrationCount},
         {"noteOnThreshold", s.noteOnThreshold},
         {"noteOffThreshold", s.noteOffThreshold},
-        {"readings", std::vector<uint16_t>(s.readings, s.readings + s.keyCount)},
-        {"baselines", std::vector<float>(s.baselines, s.baselines + s.keyCount)},
-        {"ratios", std::vector<float>(s.ratios, s.ratios + s.keyCount)},
-        {"noteStates", std::vector<bool>(s.noteStates, s.noteStates + s.keyCount)},
-        {"aftertouchValues", std::vector<uint8_t>(s.aftertouchValues, s.aftertouchValues + s.keyCount)}
+        {"readings", std::vector<uint16_t>(s.readings, s.readings + NumKeys)},
+        {"baselines", std::vector<float>(s.baselines, s.baselines + NumKeys)},
+        {"ratios", std::vector<float>(s.ratios, s.ratios + NumKeys)},
+        {"noteStates", std::vector<bool>(s.noteStates, s.noteStates + NumKeys)},
+        {"aftertouchValues", std::vector<uint8_t>(s.aftertouchValues, s.aftertouchValues + NumKeys)}
     };
 }
 
@@ -65,7 +84,12 @@ inline void to_json(nlohmann::json& j, const KeyScanStats& s) {
  * - Polyphonic Aftertouch based on continuous pressure sensing
  * - Baseline tracking that freezes during touch for maximum aftertouch expression
  * - Configurable transposition and velocity
+ * 
+ * Template parameter allows compile-time optimization with stack arrays.
+ * 
+ * @tparam NumKeys Number of keys (must match scanner configuration)
  */
+template<uint8_t NumKeys>
 class MidiKeyboardController {
 public:
     static constexpr uint16_t CALIBRATION_SCANS = 10;
@@ -87,7 +111,7 @@ public:
     MidiKeyboardController(
         KeyScanner& scanner,
         std::function<void(uint8_t)> midiCallback,
-        std::unique_ptr<features::TelemetrySink<KeyScanStats>> telemetrySink,
+        std::unique_ptr<features::TelemetrySink<KeyScanStats<NumKeys>>> telemetrySink,
         uint8_t baseNote = 60,
         uint8_t fixedVelocity = 64
     )
@@ -99,15 +123,13 @@ public:
         , calibrationCount_(0)
         , isCalibrated_(false)
         , telemetryEnabled_(false)
+        , calibrationSums_{}
+        , baselines_{}
+        , keyStates_{}
+        , lastAftertouch_{}
     {
-        uint8_t keyCount = scanner_.getKeyCount();
-        baselines_.resize(keyCount, 0.0f);
-        calibrationSums_.resize(keyCount, 0);
-        keyStates_.resize(keyCount, false);
-        lastAftertouch_.resize(keyCount, 0);
-        
         logInfo("MIDI keyboard controller initialized: %d keys, base note %d, velocity %d",
-                keyCount, baseNote_, fixedVelocity_);
+                NumKeys, baseNote_, fixedVelocity_);
     }
     
     /**
@@ -118,11 +140,10 @@ public:
      */
     void processScan() {
         const uint16_t* readings = scanner_.getScanReadings();
-        uint8_t keyCount = scanner_.getKeyCount();
         
         // Calibration phase: accumulate baseline values
         if (!isCalibrated_) {
-            for (uint8_t i = 0; i < keyCount; i++) {
+            for (uint8_t i = 0; i < NumKeys; i++) {
                 calibrationSums_[i] += readings[i];
             }
             
@@ -130,7 +151,7 @@ public:
             
             if (calibrationCount_ >= CALIBRATION_SCANS) {
                 // Finalize calibration with minimum baseline enforcement
-                for (uint8_t i = 0; i < keyCount; i++) {
+                for (uint8_t i = 0; i < NumKeys; i++) {
                     float avgBaseline = static_cast<float>(calibrationSums_[i]) / CALIBRATION_SCANS;
                     baselines_[i] = std::max(avgBaseline, MIN_BASELINE);
                 }
@@ -141,20 +162,19 @@ public:
         }
         
         // Normal operation: process each key
-        for (uint8_t i = 0; i < keyCount; i++) {
+        for (uint8_t i = 0; i < NumKeys; i++) {
             processKey(i, readings[i]);
         }
         
         // Send telemetry if enabled
         if (telemetryEnabled_) {
-            KeyScanStats telemetry;
-            telemetry.keyCount = keyCount;
+            KeyScanStats<NumKeys> telemetry;
             telemetry.isCalibrated = true;
             telemetry.calibrationCount = CALIBRATION_SCANS;
             telemetry.noteOnThreshold = NOTE_ON_THRESHOLD;
             telemetry.noteOffThreshold = NOTE_OFF_THRESHOLD;
             
-            for (uint8_t i = 0; i < keyCount && i < KeyScanStats::MAX_KEYS; i++) {
+            for (uint8_t i = 0; i < NumKeys; i++) {
                 telemetry.readings[i] = readings[i];
                 telemetry.baselines[i] = baselines_[i];
                 telemetry.ratios[i] = (baselines_[i] > 0) ? (readings[i] / baselines_[i]) : 0.0f;  // Ratio of reading to baseline
@@ -207,19 +227,19 @@ public:
 private:
     KeyScanner& scanner_;
     std::function<void(uint8_t)> midiCallback_;
-    std::unique_ptr<features::TelemetrySink<KeyScanStats>> telemetrySink_;
+    std::unique_ptr<features::TelemetrySink<KeyScanStats<NumKeys>>> telemetrySink_;
     uint8_t baseNote_;
     uint8_t fixedVelocity_;
     
     // Calibration state
     uint16_t calibrationCount_;
     bool isCalibrated_;
-    std::vector<uint32_t> calibrationSums_;
+    uint32_t calibrationSums_[NumKeys];
     
     // Per-key state
-    std::vector<float> baselines_;       // Current baseline (ambient) value
-    std::vector<bool> keyStates_;        // Note on/off state
-    std::vector<uint8_t> lastAftertouch_; // Last sent aftertouch value
+    float baselines_[NumKeys];       // Current baseline (ambient) value
+    bool keyStates_[NumKeys];        // Note on/off state
+    uint8_t lastAftertouch_[NumKeys]; // Last sent aftertouch value
     
     // Telemetry
     bool telemetryEnabled_;

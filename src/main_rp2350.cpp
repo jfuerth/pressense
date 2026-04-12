@@ -17,9 +17,19 @@
 // Platform-agnostic MIDI logic
 #include <midi_keyboard_controller.hpp>
 
+// Configuration: Number of keys to scan
+static constexpr uint8_t FIRST_KEY_PIN = 0;  // First GPIO pin for keys
+static constexpr uint8_t NUM_KEYS = 32;       // Number of keys to scan
+
+// Scanner type with compile-time configuration
+using Scanner = rp2350::PioCapacitiveScanner<FIRST_KEY_PIN, NUM_KEYS>;
+
+// MIDI controller type with compile-time configuration
+using MidiController = midi::MidiKeyboardController<NUM_KEYS>;
+
 // Global instances
-static rp2350::PioCapacitiveScanner* scanner = nullptr;
-static midi::MidiKeyboardController* keyboard = nullptr;
+static Scanner* scanner = nullptr;
+static MidiController* keyboard = nullptr;
 
 /**
  * @brief Dummy MIDI callback (not used yet - will add USB MIDI later)
@@ -55,7 +65,7 @@ int main() {
     stdio_init_all();
     
     // Wait for USB connection to establish
-    sleep_ms(2000);
+    sleep_ms(500);
     
     printf("\n");
     printf("========================================\n");
@@ -68,7 +78,7 @@ int main() {
     
     // Initialize key scanner
     printf("Initializing PIO capacitive key scanner...\n");
-    scanner = new rp2350::PioCapacitiveScanner();
+    scanner = new Scanner();
     
     if (!scanner) {
         printf("ERROR: Failed to create scanner!\n");
@@ -79,8 +89,8 @@ int main() {
     
     // Initialize MIDI keyboard controller with telemetry
     printf("Initializing MIDI keyboard controller...\n");
-    auto telemetrySink = std::make_unique<rp2350::Rp2350TelemetrySink<midi::KeyScanStats>>();
-    keyboard = new midi::MidiKeyboardController(
+    auto telemetrySink = std::make_unique<rp2350::Rp2350TelemetrySink<midi::KeyScanStats<NUM_KEYS>>>();
+    keyboard = new MidiController(
         *scanner,
         midiCallback,
         std::move(telemetrySink),

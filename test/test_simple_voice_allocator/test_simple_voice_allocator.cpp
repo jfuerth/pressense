@@ -43,11 +43,6 @@ public:
         setFrequencyCallCount++;
     }
 
-    void setTimbre(float timbre) override {
-        lastSetTimbre = timbre;
-        setTimbreCallCount++;
-    }
-
     void setVolume(float volume) override {
         lastSetVolume = volume;
         setVolumeCallCount++;
@@ -78,7 +73,6 @@ public:
     float lastTriggerFrequency = 0.0f;
     float lastTriggerVolume = 0.0f;
     float lastSetFrequency = 0.0f;
-    float lastSetTimbre = 0.0f;
     float lastSetVolume = 0.0f;
     float lastPitchBend = 0.0f;
     float pitchBendRange = 2.0f;
@@ -88,7 +82,6 @@ public:
     int triggerCallCount = 0;
     int releaseCallCount = 0;
     int setFrequencyCallCount = 0;
-    int setTimbreCallCount = 0;
     int setVolumeCallCount = 0;
     int setPitchBendCallCount = 0;
     mutable int getPitchBendRangeCallCount = 0;

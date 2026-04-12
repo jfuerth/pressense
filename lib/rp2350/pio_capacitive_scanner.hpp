@@ -21,16 +21,27 @@ namespace rp2350 {
  * Each key is scanned sequentially by dynamically reconfiguring the PIO state machine
  * via DMA control blocks. The entire scan sequence runs autonomously without CPU intervention.
  * 
+ * Template parameters allow compile-time optimization while maintaining configuration
+ * independence (no global defines required).
+ * 
  * HARDWARE REQUIREMENTS:
- * - GPIO 0-31 connected to capacitive touch sensors
+ * - GPIO pins (starting from FirstKeyPin) connected to capacitive touch sensors
  * - Internal pull-up resistors enabled dynamically during scan
  * - External electrodes (copper pads, conductive fabric, etc.)
+ * 
+ * @tparam FirstKeyPin GPIO pin number for first key
+ * @tparam NumKeys Number of keys to scan (must be <= 32 - FirstKeyPin)
  */
+template<uint8_t FirstKeyPin = 0, uint8_t NumKeys = 32>
 class PioCapacitiveScanner : public midi::KeyScanner {
 public:
-    static constexpr uint8_t NUM_KEYS = 32;
-    static constexpr uint8_t FIRST_KEY_PIN = 0;
     static constexpr float PIO_CLOCK_DIV = 5.0f;  // Tuned for capacitive response time
+    
+    // It would be possible to support a mix of GPIOs below and above 32, but we would need to modify the
+    // PIO register setup in the DMA control blocks to handle the different pinctrl configuration.
+    // For now, we enforce the limit of 32 GPIOs total (FirstKeyPin + NumKeys <= 32) to keep the code simpler.
+    static_assert(FirstKeyPin + NumKeys <= 32, 
+                  "PioCapacitiveScanner: FirstKeyPin + NumKeys must not exceed 32 (GPIO limit)");
     
     /**
      * @brief DMA control block structure for scripted operations
@@ -67,12 +78,12 @@ public:
         // Initialize state machine
         pio_sm_config config = capacitive_touch_program_get_default_config(pioOffset_);
         sm_config_set_clkdiv(&config, PIO_CLOCK_DIV);
-        sm_config_set_set_pins(&config, FIRST_KEY_PIN, 1);
-        sm_config_set_jmp_pin(&config, FIRST_KEY_PIN);
+        sm_config_set_set_pins(&config, FirstKeyPin, 1);
+        sm_config_set_jmp_pin(&config, FirstKeyPin);
         
         // Start at wait_for_restart label
         pio_sm_init(pio_, sm_, pioOffset_ + capacitive_touch_offset_wait_for_restart, &config);
-        pio_sm_set_consecutive_pindirs(pio_, sm_, FIRST_KEY_PIN, 1, false);
+        pio_sm_set_consecutive_pindirs(pio_, sm_, FirstKeyPin, 1, false);
         pio_sm_set_enabled(pio_, sm_, true);
         
         // Claim DMA channels
@@ -89,7 +100,7 @@ public:
             printf("ERROR: Failed to allocate DMA control blocks!\n");
         }
         
-        printf("PIO capacitive scanner initialized with %d keys\n", NUM_KEYS);
+        printf("PIO capacitive scanner initialized with %d keys\n", NumKeys);
     }
     
     ~PioCapacitiveScanner() {
@@ -116,8 +127,8 @@ public:
         }
         
         // Reset GPIOs to safe state
-        for (uint i = 0; i < NUM_KEYS; i++) {
-            uint pin = FIRST_KEY_PIN + i;
+        for (uint i = 0; i < NumKeys; i++) {
+            uint pin = FirstKeyPin + i;
             gpio_set_pulls(pin, false, false);
             gpio_set_dir(pin, GPIO_IN);
         }
@@ -167,7 +178,7 @@ public:
      */
     const uint16_t* getScanReadings() const override {
         // Convert from 32-bit inverted raw readings to 16-bit (clamped) for interface
-        for (uint8_t i = 0; i < NUM_KEYS; i++) {
+        for (uint8_t i = 0; i < NumKeys; i++) {
             readings16_[i] = static_cast<uint16_t>(std::min(0xFFFFFFFF - rawReadings_[i], 0xFFFFul));
         }
         return readings16_;
@@ -182,7 +193,7 @@ public:
     }
     
     uint8_t getKeyCount() const override {
-        return NUM_KEYS;
+        return NumKeys;
     }
     
 private:
@@ -193,12 +204,12 @@ private:
     uint dmaControlChan_;
     DmaControlBlock* controlBlocks_;
     
-    uint32_t rawReadings_[NUM_KEYS] = {0};
-    mutable uint16_t readings16_[NUM_KEYS] = {0};  // Mutable for lazy conversion in const getter
+    uint32_t rawReadings_[NumKeys] = {};
+    mutable uint16_t readings16_[NumKeys] = {};  // Mutable for lazy conversion in const getter
     
     // Persistent storage for DMA control block references
-    uint32_t execctrls_[NUM_KEYS];
-    uint32_t pinctrls_[NUM_KEYS];
+    uint32_t execctrls_[NumKeys];
+    uint32_t pinctrls_[NumKeys];
     uint32_t pueEnableBit_ = PADS_BANK0_GPIO0_PUE_BITS;
     uint32_t restartJmp_;
     
@@ -206,8 +217,8 @@ private:
      * @brief One-time GPIO setup
      */
     void setupGpios() {
-        for (uint i = 0; i < NUM_KEYS; i++) {
-            uint pin = FIRST_KEY_PIN + i;
+        for (uint i = 0; i < NumKeys; i++) {
+            uint pin = FirstKeyPin + i;
             gpio_set_pulls(pin, false, false);  // Start with pulls disabled
             pio_gpio_init(pio_, pin);
         }
@@ -219,7 +230,7 @@ private:
      */
     DmaControlBlock* setupDmaControlBlocks() {
         // 6 operations per key (2 GPIO + 2 PIO config + 1 restart + 1 read) + 1 null block
-        const uint numBlocks = NUM_KEYS * 6 + 1;
+        const uint numBlocks = NumKeys * 6 + 1;
         DmaControlBlock* blocks = static_cast<DmaControlBlock*>(
             malloc(numBlocks * sizeof(DmaControlBlock)));
         
@@ -230,8 +241,8 @@ private:
         // Build execctrl and pinctrl for each key
         pio_sm_config config = capacitive_touch_program_get_default_config(pioOffset_);
         
-        for (uint i = 0; i < NUM_KEYS; i++) {
-            uint pin = FIRST_KEY_PIN + i;
+        for (uint i = 0; i < NumKeys; i++) {
+            uint pin = FirstKeyPin + i;
             sm_config_set_set_pins(&config, pin, 1);
             sm_config_set_jmp_pin(&config, pin);
             
@@ -262,10 +273,10 @@ private:
         channel_config_set_irq_quiet(&pioReadCfg, true);
         
         // Build control blocks for each key
-        for (uint i = 0; i < NUM_KEYS; i++) {
+        for (uint i = 0; i < NumKeys; i++) {
             uint blockBase = i * 6;
-            uint currentPin = FIRST_KEY_PIN + i;
-            uint prevPin = FIRST_KEY_PIN + ((i + NUM_KEYS - 1) % NUM_KEYS);
+            uint currentPin = FirstKeyPin + i;
+            uint prevPin = FirstKeyPin + ((i + NumKeys - 1) % NumKeys);
             
             // 1. Disable pull-up on previous key
             blocks[blockBase + 0].read_addr = &pueEnableBit_;
@@ -305,10 +316,10 @@ private:
         }
         
         // Null control block at end (triggers IRQ)
-        blocks[NUM_KEYS * 6].read_addr = nullptr;
-        blocks[NUM_KEYS * 6].write_addr = nullptr;
-        blocks[NUM_KEYS * 6].transfer_count = 0;
-        blocks[NUM_KEYS * 6].ctrl = 0;
+        blocks[NumKeys * 6].read_addr = nullptr;
+        blocks[NumKeys * 6].write_addr = nullptr;
+        blocks[NumKeys * 6].transfer_count = 0;
+        blocks[NumKeys * 6].ctrl = 0;
         
         // Configure control DMA
         dma_channel_config controlCfg = dma_channel_get_default_config(dmaControlChan_);
@@ -323,7 +334,7 @@ private:
                              4,      // Transfer 4 words per control block
                              false); // Don't start yet
         
-        printf("Created %u DMA control blocks for %u keys\n", numBlocks, NUM_KEYS);
+        printf("Created %u DMA control blocks for %u keys\n", numBlocks, NumKeys);
         
         return blocks;
     }

@@ -33,11 +33,6 @@ public:
         setFrequencyCallCount++;
     }
     
-    void setTimbre(float timbre) override {
-        lastSetTimbre = timbre;
-        setTimbreCallCount++;
-    }
-    
     void setVolume(float volume) override {
         lastSetVolume = volume;
         setVolumeCallCount++;
@@ -67,7 +62,6 @@ public:
     float lastTriggerFrequency = 0.0f;
     float lastTriggerVolume = 0.0f;
     float lastSetFrequency = 0.0f;
-    float lastSetTimbre = 0.0f;
     float lastSetVolume = 0.0f;
     float lastPitchBend = 0.0f;
     float pitchBendRange = 2.0f; // Default 2 semitones
@@ -77,7 +71,6 @@ public:
     int triggerCallCount = 0;
     int releaseCallCount = 0;
     int setFrequencyCallCount = 0;
-    int setTimbreCallCount = 0;
     int setVolumeCallCount = 0;
     int setPitchBendCallCount = 0;
     mutable int getPitchBendRangeCallCount = 0;
@@ -211,7 +204,6 @@ void test_noteOn_should_allocateASynthVoice(void) {
     
     // Assert - Verify synth methods that should not be called
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, voice->releaseCallCount, "release should not be called for Note On");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, voice->setTimbreCallCount, "setTimbre should not be called for basic Note On");
 }
 
 void test_noteOn_shouldIgnoreWrongChannel(void) {
@@ -439,7 +431,6 @@ void test_pitchBend_shouldRespectCustomPitchBendRange(void) {
 // TODO test system common bytes
 // TODO test system real-time bytes
 // TODO test system exclusive messages
-// TODO test polyphonic aftertouch messages (setTimbre 0f..1f)
 // TODO test control change (volume for now, log others)
 // TODO test program change (log program number)
 // TODO test channel aftertouch
