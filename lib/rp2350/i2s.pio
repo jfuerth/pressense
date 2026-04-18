@@ -1,23 +1,28 @@
 /*
+Modified from https://github.com/lichen-community-systems/pio-i2s/blob/main/src/pio-i2s-out.pio
 Copyright 2025 Kinetic Light and Lichen Community Systems
 Licensed under the BSD-3 License.
+
+Local modification: performs stereo expansion to reduce CPU time spent doubling samples.
 */
 
 .program PioI2S_out
 
+/* Side-set pins: LRCLK, BITCLK */
 .side_set 2
 
 public entry_point:
-pull noblock            side 0b00
-set x, 30               side 0b01
+pull noblock                side 0b00
+mov y, osr                  side 0b00
+set x, 30               [1] side 0b01
 
 outputLeft:
-    out pins, 1         side 0b00
-    jmp x-- outputLeft  side 0b01
+    out pins, 1         [1] side 0b00
+    jmp x-- outputLeft  [1] side 0b01
 
-pull noblock            side 0b10
-set x, 30               side 0b11
+mov osr, y              [1] side 0b10
+set x, 30               [1] side 0b11
 
 outputRight:
-    out pins, 1         side 0b10
-    jmp x-- outputRight side 0b11
+    out pins, 1         [1] side 0b10
+    jmp x-- outputRight [1] side 0b11
