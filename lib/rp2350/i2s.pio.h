@@ -20,7 +20,7 @@
 
 static const uint16_t PioI2S_out_program_instructions[] = {
             //     .wrap_target
-    0x8080, //  0: pull   noblock         side 0
+    0x80a0, //  0: pull   block           side 0
     0xa047, //  1: mov    y, osr          side 0
     0xe93e, //  2: set    x, 30           side 1 [1]
     0x6101, //  3: out    pins, 1         side 0 [1]

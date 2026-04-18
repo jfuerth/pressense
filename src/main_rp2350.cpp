@@ -37,6 +37,8 @@ static constexpr uint8_t FIRST_KEY_PIN = 0;
 static constexpr uint8_t NUM_KEYS = 32;
 static constexpr uint8_t NUM_VOICES = 8;
 
+static constexpr float MASTER_VOLUME = 0.3f;  // Master volume scaling factor (0.0 to 1.0)
+
 // Type aliases
 using Scanner = rp2350::PioCapacitiveScanner<FIRST_KEY_PIN, NUM_KEYS>;
 using AudioSink = rp2350::Rp2350AudioSink<BUFFER_SIZE>;
@@ -70,36 +72,42 @@ void generateAudio(int32_t* buffer, size_t length) {
         });
         
         // Scale down by number of voices to prevent clipping, then apply master volume
-        mixedSample = mixedSample / static_cast<float>(NUM_VOICES) * 0.8f;
+        const float INTEGER_SCALE = 1073741824.0f; // 2^30, since PIO outputs 31-bit signed samples
+        mixedSample = (mixedSample / static_cast<float>(NUM_VOICES)) * MASTER_VOLUME * INTEGER_SCALE;
         
         // Clamp to [-1, 1]
-        if (mixedSample > 1.0f) mixedSample = 1.0f;
-        if (mixedSample < -1.0f) mixedSample = -1.0f;
+        // if (mixedSample > 1.0f) mixedSample = 1.0f;
+        // if (mixedSample < -1.0f) mixedSample = -1.0f;
         
         // Convert to 31-bit integer (PIO outputs 31 bits per channel)
-        buffer[i] = static_cast<int32_t>(mixedSample * 1073741823.0f);
+        buffer[i] = static_cast<int32_t>(mixedSample);
     }
 }
 
 /**
  * @brief Audio generation loop (runs on core 1)
  *
- * Fills the inactive buffer while the active buffer is being transmitted via
- * DMA, then swaps. This keeps the PIO TX FIFO continuously fed.
+ * Uses triple-buffering approach: while buffer A is being transmitted via DMA,
+ * we fill buffer B. When DMA completes, we immediately swap to buffer B
+ * (which is already filled) and start filling buffer A for the next swap.
  */
 void core1_audio_loop() {
     printf("Core 1: audio loop started\n");
 
+    // Pre-fill the inactive buffer so it's ready when the first DMA completes
+    generateAudio(audioSink->getInactiveBuffer(), BUFFER_SIZE);
+
     while (true) {
-        // Wait for the current DMA transfer to finish before touching the
-        // inactive buffer — the previous swap may have just started it.
+        // Wait for the current DMA transfer to complete
         while (!audioSink->isTransferComplete()) {
             tight_loop_contents();
         }
 
-        // Fill the now-idle buffer and promote it to active.
-        generateAudio(audioSink->getInactiveBuffer(), BUFFER_SIZE);
+        // Immediately swap to the pre-filled buffer and start DMA
         audioSink->swapBuffers();
+        
+        // Now fill the new inactive buffer while DMA runs on the other one
+        generateAudio(audioSink->getInactiveBuffer(), BUFFER_SIZE);
     }
 }
 

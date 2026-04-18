@@ -12,7 +12,7 @@ Local modification: performs stereo expansion to reduce CPU time spent doubling 
 .side_set 2
 
 public entry_point:
-pull noblock                side 0b00
+pull block                side 0b00
 mov y, osr                  side 0b00
 set x, 30               [1] side 0b01
 
