@@ -16,11 +16,10 @@
 #include <pio_capacitive_scanner.hpp>
 #include <rp2350_audio_sink.hpp>
 #include <rp2350_telemetry_sink.hpp>
+#include <embedded_program_storage.hpp>
 
 // Synth modules
-#include <sawtooth_synth.hpp>
-#include <simple_voice_allocator.hpp>
-#include <stream_processor.hpp>
+#include <synth_application.hpp>
 
 // MIDI keyboard controller
 #include <midi_keyboard_controller.hpp>
@@ -45,7 +44,6 @@ using AudioSink = rp2350::Rp2350AudioSink<BUFFER_SIZE>;
 using MidiController = midi::MidiKeyboardController<NUM_KEYS>;
 
 // Global instances
-static Scanner* scanner = nullptr;
 static AudioSink* audioSink = nullptr;
 static MidiController* keyboard = nullptr;
 static midi::StreamProcessor* midiProcessor = nullptr;
@@ -72,14 +70,10 @@ void generateAudio(int32_t* buffer, size_t length) {
         });
         
         // Scale down by number of voices to prevent clipping, then apply master volume
+        // Convert to 31-bit integer (PIO outputs 31 bits per channel)
         const float INTEGER_SCALE = 1073741824.0f; // 2^30, since PIO outputs 31-bit signed samples
         mixedSample = (mixedSample / static_cast<float>(NUM_VOICES)) * MASTER_VOLUME * INTEGER_SCALE;
         
-        // Clamp to [-1, 1]
-        // if (mixedSample > 1.0f) mixedSample = 1.0f;
-        // if (mixedSample < -1.0f) mixedSample = -1.0f;
-        
-        // Convert to 31-bit integer (PIO outputs 31 bits per channel)
         buffer[i] = static_cast<int32_t>(mixedSample);
     }
 }
@@ -116,24 +110,21 @@ int main() {
     stdio_init_all();
     
     // Wait for USB CDC host to connect (can take several seconds after board reset)
-    while (!stdio_usb_connected()) {
-        sleep_ms(10);
-    }
-    // Brief pause to let the terminal settle after connection
-    sleep_ms(100);
+
+    // not checking with stdio_usb_connected() because we want it to work when not connected to a host
+    sleep_ms(2000);
     
     printf("\n");
     printf("========================================\n");
     printf("   Pressence Synth - RP2350B Platform  \n");
     printf("========================================\n");
-    printf("Board: Waveshare Core 2350B\n");
-    printf("CPU: RP2350 Cortex-M33 @ %lu MHz\n", clock_get_hz(clk_sys) / 1000000);
-    printf("Phase: Key Scanner + Synth + Audio\n");
-    printf("========================================\n\n");
+    printf("CPU: RP2350 Cortex-M33 @ %lu MHz\n\n", clock_get_hz(clk_sys) / 1000000);
     
-    // Initialize key scanner
+    platform::SynthApplication synthApp = platform::SynthApplication(SAMPLE_RATE, 2, NUM_VOICES, std::make_unique<rp2350::EmbeddedProgramStorage>());
+    
+    // Set up a key scanner that feeds into the synth via MIDI events
     printf("Initializing PIO capacitive key scanner...\n");
-    scanner = new Scanner();
+    std::unique_ptr<Scanner> scanner = std::make_unique<Scanner>();
     
     if (!scanner) {
         printf("ERROR: Failed to create scanner!\n");

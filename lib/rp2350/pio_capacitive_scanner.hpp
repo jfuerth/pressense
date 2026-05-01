@@ -280,13 +280,13 @@ private:
             
             // 1. Disable pull-up on previous key
             blocks[blockBase + 0].read_addr = &pueEnableBit_;
-            blocks[blockBase + 0].write_addr = (void*)&padsbank0_hw->io[prevPin] + REG_ALIAS_CLR_BITS;
+            blocks[blockBase + 0].write_addr = hw_clear_alias_untyped(&padsbank0_hw->io[prevPin]);
             blocks[blockBase + 0].transfer_count = 1;
             blocks[blockBase + 0].ctrl = pioWriteCfg.ctrl;
             
             // 2. Enable pull-up on current key
             blocks[blockBase + 1].read_addr = &pueEnableBit_;
-            blocks[blockBase + 1].write_addr = (void*)&padsbank0_hw->io[currentPin] + REG_ALIAS_SET_BITS;
+            blocks[blockBase + 1].write_addr = hw_set_alias_untyped(&padsbank0_hw->io[currentPin]);
             blocks[blockBase + 1].transfer_count = 1;
             blocks[blockBase + 1].ctrl = pioWriteCfg.ctrl;
             

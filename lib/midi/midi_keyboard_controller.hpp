@@ -103,7 +103,7 @@ public:
     /**
      * @brief Construct MIDI keyboard controller
      * @param scanner Reference to key scanner (must outlive this controller)
-     * @param midiCallback Function to send MIDI bytes
+     * @param midiCallback Function to send MIDI bytes (required, must be valid)
      * @param telemetrySink Platform-specific telemetry output (use NoTelemetrySink if not needed)
      * @param baseNote MIDI note number for first key (default 60 = C4)
      * @param fixedVelocity Note-on velocity 0-127 (default 64)
@@ -122,12 +122,18 @@ public:
         , fixedVelocity_(fixedVelocity)
         , calibrationCount_(0)
         , isCalibrated_(false)
-        , telemetryEnabled_(false)
         , calibrationSums_{}
         , baselines_{}
         , keyStates_{}
         , lastAftertouch_{}
+        , telemetryEnabled_(false)
     {
+        if (!midiCallback_) {
+            logFatal("MidiKeyboardController: midiCallback is required");
+        }
+        if (!telemetrySink_) {
+            logFatal("MidiKeyboardController: telemetrySink is required (use NoTelemetrySink if not needed)");
+        }
         logInfo("MIDI keyboard controller initialized: %d keys, base note %d, velocity %d",
                 NumKeys, baseNote_, fixedVelocity_);
     }

@@ -179,25 +179,22 @@ extern "C" void app_main(void) {
            audioSink->getChannels(), 
            audioSink->getBufferFrames());
     
-    // Create synthesizer application with the ACTUAL sample rate
     logInfo("Initializing synthesizer...");
-    auto programStorage = std::make_unique<esp32::EmbeddedProgramStorage>();
-    synthApp = std::make_unique<platform::SynthApplication>(actualSampleRate, CHANNELS, MAX_VOICES, std::move(programStorage));
+    synthApp = std::make_unique<platform::SynthApplication>(
+        actualSampleRate,
+        CHANNELS,
+        MAX_VOICES,
+        std::make_unique<esp32::EmbeddedProgramStorage>());
         
     // Start capacitive touch keyboard
     logInfo("Starting capacitive keyboard scanner...");
     scanner = std::make_unique<ScannerType>();
     
     logInfo("Initializing MIDI keyboard controller...");
-    auto keyScanTelemetry = std::make_unique<esp32::Esp32TelemetrySink<midi::KeyScanStats<NUM_KEYS>>>("keyscan_telem", 0);
     keyboard = std::make_unique<MidiControllerType>(
         *scanner,
-        [](uint8_t byte) {
-            if (synthApp) {
-                synthApp->processMidiByte(byte);
-            }
-        },
-        std::move(keyScanTelemetry),
+        [](uint8_t byte) { synthApp->processMidiByte(byte); },
+        std::make_unique<esp32::Esp32TelemetrySink<midi::KeyScanStats<NUM_KEYS>>>("keyscan_telem", 0),
         60-24,  // Base note: C4
         20   // Fixed velocity
     );
