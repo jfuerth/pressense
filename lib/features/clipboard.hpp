@@ -1,11 +1,9 @@
 #pragma once
 
-#include <synth_voice_allocator.hpp>
+#include <program_storage.hpp>
 #include <cstdint>
 
 namespace features {
-
-class ProgramStorage;
 
 /**
  * @brief Interface for preset clipboard functionality
@@ -15,26 +13,32 @@ class ProgramStorage;
  */
 class Clipboard {
 public:
+    using VoiceVisitor = ProgramStorage::VoiceVisitor;
+    using VoiceIterator = ProgramStorage::VoiceIterator;
+    
     virtual ~Clipboard() = default;
     
     /**
      * @brief Copy current voice settings to clipboard
+     * @param forEachVoice Function to iterate all voices
      */
-    virtual void copy(midi::SynthVoiceAllocator& allocator) = 0;
+    virtual void copy(VoiceIterator forEachVoice) = 0;
     
     /**
      * @brief Paste clipboard contents to voices
+     * @param forEachVoice Function to iterate all voices
      * @return true if clipboard had data to paste
      */
-    virtual bool paste(midi::SynthVoiceAllocator& allocator) = 0;
+    virtual bool paste(VoiceIterator forEachVoice) = 0;
     
     /**
      * @brief Paste clipboard and save to program file
+     * @param forEachVoice Function to iterate all voices
      * @param program Program number to save to
      * @param storage Program storage implementation to use for saving
      * @return true if successful
      */
-    virtual bool pasteAndSave(midi::SynthVoiceAllocator& allocator, uint8_t program, ProgramStorage& storage) = 0;
+    virtual bool pasteAndSave(VoiceIterator forEachVoice, uint8_t program, ProgramStorage& storage) = 0;
     
     /**
      * @brief Check if clipboard has data

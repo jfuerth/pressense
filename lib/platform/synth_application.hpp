@@ -2,7 +2,7 @@
 
 #include <sawtooth_synth.hpp>
 #include <stream_processor.hpp>
-#include <simple_voice_allocator.hpp>
+#include <polyphonic_synth_target.hpp>
 #include <output_processor.hpp>
 #include <timing_stats.hpp>
 #include <log.hpp>
@@ -28,9 +28,16 @@ namespace platform {
  * 
  * Manages synth voices, MIDI processing, and audio rendering.
  * Platform-specific code provides MIDI input and audio output.
+ * 
+ * Architecture:
+ * - PolyphonicSynthTarget: Bridges MIDI to synth voices (owns voices)
+ * - StreamProcessor: Parses MIDI bytes, routes to target
+ * - OutputProcessor: Post-processing (drive, filtering)
  */
 class SynthApplication {
 public:
+    using VoicePool = PolyphonicSynthTarget<synth::WavetableSynth>;
+
     SynthApplication(unsigned int sampleRate = 44100,
                      unsigned int channels = 2,
                      uint8_t maxVoices = 8,
@@ -42,43 +49,40 @@ public:
         , currentProgram_(1)
         , programStorage_(std::move(programStorage))
 #ifdef FEATURE_PERFORMANCE_TIMING
-        , platformTimer_()  // Capture CPU frequency at construction
+        , platformTimer_()
 #endif
-        {
-        
+    {
         logInfo("Initializing synthesizer: %d Hz, %d voices", sampleRate_, maxVoices_);
         
-        // Create voice allocator with wavetable synth factory
-        auto voiceFactory = [sampleRate]() -> std::unique_ptr<midi::Synth> {
-            return std::make_unique<synth::WavetableSynth>(static_cast<float>(sampleRate));
-        };
-        
-        auto voiceAllocator = std::make_unique<midi::SimpleVoiceAllocator>(maxVoices_, voiceFactory);
+        // Create voice pool with wavetable synth factory
+        voicePool_ = std::make_unique<VoicePool>(
+            maxVoices_,
+            [sampleRate]() {
+                return std::make_unique<synth::WavetableSynth>(static_cast<float>(sampleRate));
+            }
+        );
         
         // Load program using provided storage implementation
         if (programStorage_) {
-            programStorage_->loadProgram(currentProgram_, *voiceAllocator);
+            loadCurrentProgram();
         } else {
             logWarn("No program storage provided; using synthesizer defaults");
         }
         
-        // Create MIDI processor with callbacks
+        // Create MIDI processor with callbacks that capture our voice pool
         midiProcessor_ = std::make_unique<midi::StreamProcessor>(
-            std::move(voiceAllocator),
+            *voicePool_,
             0,  // Default channel
-            [this](uint8_t ch, uint8_t cc, uint8_t val, midi::SynthVoiceAllocator& alloc) {
-                handleCC(ch, cc, val, alloc);
+            [this](uint8_t ch, uint8_t cc, uint8_t val) {
+                handleCC(ch, cc, val);
             },
-            [this](uint8_t ch, uint8_t note, uint8_t pressure, midi::Synth& voice) {
-                handlePolyAftertouch(ch, note, pressure, voice);
-            },
-            [this](uint8_t ch, uint8_t prog, midi::SynthVoiceAllocator& alloc) {
-                handleProgramChange(ch, prog, alloc);
+            [this](uint8_t ch, uint8_t prog) {
+                handleProgramChange(ch, prog);
             }
         );
         
         // Allocate temporary buffer for mono processing
-        monoBuffer_.resize(256);  // Will resize as needed
+        monoBuffer_.resize(256);
         
         logInfo("MIDI processor ready with %d voices", maxVoices_);
     }
@@ -100,24 +104,17 @@ public:
         platform::IntervalTimer<> timer;
 #endif
         
-        // Get all voices
-        std::vector<synth::WavetableSynth*> activeSynths;
-        midiProcessor_->forEachVoice([&](midi::Synth& synth) {
-            activeSynths.push_back(static_cast<synth::WavetableSynth*>(&synth));
-        });
-        
         // Resize mono buffer if needed
         if (monoBuffer_.size() < numFrames) {
             monoBuffer_.resize(numFrames);
         }
         
         // Pass 1: Mix all voices into mono buffer
-        // Note: Per-voice timing is tracked inside WavetableSynth::nextSample()
         for (unsigned int frame = 0; frame < numFrames; ++frame) {
             float sample = 0.0f;
-            for (auto* synth : activeSynths) {
-                sample += synth->nextSample();
-            }
+            voicePool_->forEachVoice([&sample](synth::WavetableSynth& synth) {
+                sample += synth.nextSample();
+            });
             monoBuffer_[frame] = sample;
         }
         
@@ -132,10 +129,11 @@ public:
         timingOutputProcessing_.record(timer.elapsed());
 #endif
         
-        for (u_int32_t frame = 0; frame < numFrames; ++frame) {
+        // Pass 3: Duplicate mono to stereo
+        for (unsigned int frame = 0; frame < numFrames; ++frame) {
             float processed = monoBuffer_[frame];
-            buffer[frame * channels_ + 0] = processed; // Left
-            buffer[frame * channels_ + 1] = processed; // Right
+            buffer[frame * channels_ + 0] = processed;
+            buffer[frame * channels_ + 1] = processed;
         }
         
 #ifdef FEATURE_PERFORMANCE_TIMING
@@ -145,9 +143,6 @@ public:
 
     /**
      * @brief Get timing statistics and reset counters
-     * @param outVoiceMixing Voice mixing timing stats
-     * @param outOutputProcessing Output processing timing stats
-     * @param outStereoDup Stereo duplication timing stats
      */
     void getAndResetTimingStats(TimingStats& outVoiceMixing,
                                  TimingStats& outOutputProcessing,
@@ -163,23 +158,22 @@ public:
     
     /**
      * @brief Access voice timing for aggregation
-     * Called by main loop to collect per-voice component timing
      */
     VoiceTimingStats getAndResetVoiceTimingStats() {
         VoiceTimingStats combined;
         
-        midiProcessor_->forEachVoice([&](midi::Synth& synth) {
-            auto& ws = static_cast<synth::WavetableSynth&>(synth);
-            auto voiceStats = ws.getAndResetVoiceTimingStats();
-            
-            // Merge per-voice stats
+        voicePool_->forEachVoice([&](synth::WavetableSynth& voice) {
+            auto voiceStats = voice.getAndResetVoiceTimingStats();
             combined.merge(voiceStats);
         });
         
         return combined;
     }
     
-    midi::StreamProcessor& getMidiProcessor() { return *midiProcessor_; }
+    /**
+     * @brief Get the voice pool for direct access (e.g., for program loading)
+     */
+    VoicePool& getVoicePool() { return *voicePool_; }
     
 #ifdef FEATURE_CLIPBOARD
     void setClipboard(std::unique_ptr<features::Clipboard> clipboard) {
@@ -188,50 +182,50 @@ public:
 #endif
 
 private:
-    void handleCC(uint8_t channel, uint8_t cc, uint8_t value, midi::SynthVoiceAllocator& allocator) {
+    void handleCC(uint8_t channel, uint8_t cc, uint8_t value) {
         float normalized = static_cast<float>(value) / 127.0f;
         
         switch(cc) {
-            case 1:  // Modulation wheel -> waveform shape
-                allocator.forEachVoice([normalized](midi::Synth& voice) {
-                    static_cast<synth::WavetableSynth&>(voice).getOscillator().updateWavetable(normalized);
+            case 1: // Modulation wheel -> waveform shape
+                voicePool_->forEachVoice([normalized](synth::WavetableSynth& voice) {
+                    voice.getOscillator().updateWavetable(normalized);
                 });
                 break;
-            case 20: {// Filter cutoff (exponential 100Hz - 10kHz)
+            case 20: { // Filter cutoff (exponential 100Hz - 10kHz)
                     const float MIN_CUTOFF = 100.0f;
                     const float MAX_CUTOFF = 10000.0f;
                     float cutoff = MIN_CUTOFF * std::pow(MAX_CUTOFF / MIN_CUTOFF, normalized);
-                    allocator.forEachVoice([cutoff](midi::Synth& voice) {
-                        static_cast<synth::WavetableSynth&>(voice).setBaseCutoff(cutoff);
+                    voicePool_->forEachVoice([cutoff](synth::WavetableSynth& voice) {
+                        voice.setBaseCutoff(cutoff);
                     });
                 }
                 break;
             case 21: // Filter resonance (Q 0.1 - 20.0)
-                allocator.forEachVoice([normalized](midi::Synth& voice) {
-                    static_cast<synth::WavetableSynth&>(voice).getFilter().setQ(0.1f + normalized * 19.9f);
+                voicePool_->forEachVoice([normalized](synth::WavetableSynth& voice) {
+                    voice.getFilter().setQ(0.1f + normalized * 19.9f);
                 });
                 break;
             case 71: // Filter envelope attack (1ms - 2s)
-                allocator.forEachVoice([normalized](midi::Synth& voice) {
+                voicePool_->forEachVoice([normalized](synth::WavetableSynth& voice) {
                     float attackTime = 0.001f + normalized * 2.0f;
-                    static_cast<synth::WavetableSynth&>(voice).getFilterEnvelope().setAttackTime(attackTime);
+                    voice.getFilterEnvelope().setAttackTime(attackTime);
                 });
                 break;
             case 72: // Filter envelope decay (10ms - 5s)
-                allocator.forEachVoice([normalized](midi::Synth& voice) {
+                voicePool_->forEachVoice([normalized](synth::WavetableSynth& voice) {
                     float decayTime = 0.01f + normalized * 5.0f;
-                    static_cast<synth::WavetableSynth&>(voice).getFilterEnvelope().setDecayTime(decayTime);
+                    voice.getFilterEnvelope().setDecayTime(decayTime);
                 });
                 break;
             case 25: // Filter envelope sustain level
-                allocator.forEachVoice([normalized](midi::Synth& voice) {
-                    static_cast<synth::WavetableSynth&>(voice).getFilterEnvelope().setSustainLevel(normalized);
+                voicePool_->forEachVoice([normalized](synth::WavetableSynth& voice) {
+                    voice.getFilterEnvelope().setSustainLevel(normalized);
                 });
                 break;
             case 73: // Filter envelope release (10ms - 5s)
-                allocator.forEachVoice([normalized](midi::Synth& voice) {
+                voicePool_->forEachVoice([normalized](synth::WavetableSynth& voice) {
                     float releaseTime = 0.01f + normalized * 5.0f;
-                    static_cast<synth::WavetableSynth&>(voice).getFilterEnvelope().setReleaseTime(releaseTime);
+                    voice.getFilterEnvelope().setReleaseTime(releaseTime);
                 });
                 break;
             case 74: // Output drive
@@ -251,13 +245,12 @@ private:
                     if (normalized > 0.5f) {
                         synth::BiquadFilter::Mode newMode;
                         bool modeSet = false;
-                        allocator.forEachVoice([&newMode, &modeSet](midi::Synth& voice) {
-                            auto& ws = static_cast<synth::WavetableSynth&>(voice);
+                        voicePool_->forEachVoice([&newMode, &modeSet](synth::WavetableSynth& voice) {
                             if (!modeSet) {
-                                newMode = synth::BiquadFilter::nextMode(ws.getFilter().getMode());
+                                newMode = synth::BiquadFilter::nextMode(voice.getFilter().getMode());
                                 modeSet = true;
                             }
-                            ws.getFilter().setMode(newMode);
+                            voice.getFilter().setMode(newMode);
                         });
                     }
                 }
@@ -272,38 +265,39 @@ private:
 #ifdef FEATURE_CLIPBOARD
             case 103: // Copy to clipboard
                 if (normalized > 0.5f && clipboard_) {
-                    clipboard_->copy(allocator);
+                    clipboard_->copy([this](auto visitor) { voicePool_->forEachVoice(visitor); });
                 }
                 break;
             case 104: // Paste from clipboard
                 if (normalized > 0.5f && clipboard_) {
+                    auto voiceIterator = [this](auto visitor) { voicePool_->forEachVoice(visitor); };
                     if (currentProgram_ == 1) {
                         logError("Cannot paste into program 1 (protected)");
                     } else if (programStorage_) {
-                        clipboard_->pasteAndSave(allocator, currentProgram_, *programStorage_);
+                        clipboard_->pasteAndSave(voiceIterator, currentProgram_, *programStorage_);
                     } else {
-                        clipboard_->paste(allocator);
+                        clipboard_->paste(voiceIterator);
                     }
                 }
                 break;
 #endif
             default:
-                // Silently ignore unknown CCs (ESP32 has limited logging)
                 break;
         }
     }
     
-    void handlePolyAftertouch(uint8_t channel, uint8_t note, uint8_t pressure, midi::Synth& voice) {
-        // TODO: Map pressure to per-voice parameter
-        // Potential mappings: filter cutoff, amplitude, LFO depth, vibrato, etc.
+    void handleProgramChange(uint8_t channel, uint8_t program) {
+        currentProgram_ = program;
+        loadCurrentProgram();
     }
     
-    void handleProgramChange(uint8_t channel, uint8_t program, midi::SynthVoiceAllocator& allocator) {
-        currentProgram_ = program;
+    void loadCurrentProgram() {
         if (programStorage_) {
-            programStorage_->loadProgram(program, allocator);
+            programStorage_->loadProgram(currentProgram_, [this](auto visitor) {
+                voicePool_->forEachVoice(visitor);
+            });
         } else {
-            logWarn("Program change requested but no storage available (program %d)", program);
+            logWarn("Program change requested but no storage available (program %d)", currentProgram_);
         }
     }
 
@@ -311,20 +305,26 @@ private:
     unsigned int channels_;
     uint8_t maxVoices_;
     
+    std::unique_ptr<VoicePool> voicePool_;
+    std::unique_ptr<midi::StreamProcessor> midiProcessor_;
+    
     synth::OutputProcessor outputProcessor_;
     uint8_t currentProgram_;
     
-    std::unique_ptr<midi::StreamProcessor> midiProcessor_;
     std::vector<float> monoBuffer_;
     
     std::unique_ptr<features::ProgramStorage> programStorage_;
+    
+#ifdef FEATURE_CLIPBOARD
+    std::unique_ptr<features::Clipboard> clipboard_;
+#endif
     
     TimingStats timingVoiceMixing_;
     TimingStats timingOutputProcessing_;
     TimingStats timingStereoDup_;
 
 #ifdef FEATURE_PERFORMANCE_TIMING
-    platform::PlatformTimer platformTimer_;  // Captures CPU frequency at construction
+    platform::PlatformTimer platformTimer_;
 #endif
 };
 

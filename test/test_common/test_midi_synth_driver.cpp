@@ -1,7 +1,6 @@
 #include <unity.h>
 #include <stream_processor.hpp>
-#include <synth.hpp>
-#include <simple_voice_allocator.hpp>
+#include <note_target.hpp>
 #include <memory>
 #include <vector>
 
@@ -15,131 +14,69 @@ namespace std {
 }
 #endif
 
-// Mock implementations for testing
-class MockSynth : public midi::Synth {
+// Mock implementation of NoteTarget for testing
+class MockNoteTarget : public midi::NoteTarget {
 public:
-    void trigger(float frequencyHz, float volume) override {
-        lastTriggerFrequency = frequencyHz;
-        lastTriggerVolume = volume;
-        triggerCallCount++;
+    void noteOn(uint8_t note, uint8_t velocity) override {
+        lastNoteOnNote = note;
+        lastNoteOnVelocity = velocity;
+        noteOnCallCount++;
     }
     
-    void release() override {
-        releaseCallCount++;
+    void noteOff(uint8_t note, uint8_t velocity) override {
+        lastNoteOffNote = note;
+        lastNoteOffVelocity = velocity;
+        noteOffCallCount++;
     }
     
-    void setFrequency(float frequencyHz) override {
-        lastSetFrequency = frequencyHz;
-        setFrequencyCallCount++;
+    void polyAftertouch(uint8_t note, uint8_t pressure) override {
+        lastAftertouchNote = note;
+        lastAftertouchPressure = pressure;
+        polyAftertouchCallCount++;
     }
     
-    void setVolume(float volume) override {
-        lastSetVolume = volume;
-        setVolumeCallCount++;
+    void pitchBend(int16_t bend) override {
+        lastPitchBend = bend;
+        pitchBendCallCount++;
     }
     
-    bool isActive() const override {
-        isActiveCallCount++;
-        return activeState;
-    }
-    
-    void setPitchBend(float bendAmount) override {
-        lastPitchBend = bendAmount;
-        setPitchBendCallCount++;
-    }
-    
-    float getPitchBendRange() const override {
-        getPitchBendRangeCallCount++;
-        return pitchBendRange;
-    }
-    
-    void setPitchBendRange(float semitones) override {
-        pitchBendRange = semitones;
-        setPitchBendRangeCallCount++;
+    void channelAftertouch(uint8_t pressure) override {
+        lastChannelAftertouch = pressure;
+        channelAftertouchCallCount++;
     }
     
     // Test verification helpers
-    float lastTriggerFrequency = 0.0f;
-    float lastTriggerVolume = 0.0f;
-    float lastSetFrequency = 0.0f;
-    float lastSetVolume = 0.0f;
-    float lastPitchBend = 0.0f;
-    float pitchBendRange = 2.0f; // Default 2 semitones
-    bool activeState = false;
+    uint8_t lastNoteOnNote = 0;
+    uint8_t lastNoteOnVelocity = 0;
+    uint8_t lastNoteOffNote = 0;
+    uint8_t lastNoteOffVelocity = 0;
+    uint8_t lastAftertouchNote = 0;
+    uint8_t lastAftertouchPressure = 0;
+    int16_t lastPitchBend = 0;
+    uint8_t lastChannelAftertouch = 0;
     
     // Call counters
-    int triggerCallCount = 0;
-    int releaseCallCount = 0;
-    int setFrequencyCallCount = 0;
-    int setVolumeCallCount = 0;
-    int setPitchBendCallCount = 0;
-    mutable int getPitchBendRangeCallCount = 0;
-    int setPitchBendRangeCallCount = 0;
-    mutable int isActiveCallCount = 0;
-};
-
-class MockSynthVoiceAllocator : public midi::SynthVoiceAllocator {
-public:
-    using VoiceFactory = std::function<std::unique_ptr<MockSynth>()>;
+    int noteOnCallCount = 0;
+    int noteOffCallCount = 0;
+    int polyAftertouchCallCount = 0;
+    int pitchBendCallCount = 0;
+    int channelAftertouchCallCount = 0;
     
-    MockSynthVoiceAllocator(VoiceFactory factory = nullptr) : midi::SynthVoiceAllocator(128) {
-        // Default factory creates standard MockSynth instances
-        if (!factory) {
-            factory = []() { return std::make_unique<MockSynth>(); };
-        }
-        
-        // We're not testing the allocator here; just have a voice per note for easy testing
-        for (int i = 0; i < 128; i++) {
-            voices.push_back(factory());
-        }
+    void reset() {
+        lastNoteOnNote = 0;
+        lastNoteOnVelocity = 0;
+        lastNoteOffNote = 0;
+        lastNoteOffVelocity = 0;
+        lastAftertouchNote = 0;
+        lastAftertouchPressure = 0;
+        lastPitchBend = 0;
+        lastChannelAftertouch = 0;
+        noteOnCallCount = 0;
+        noteOffCallCount = 0;
+        polyAftertouchCallCount = 0;
+        pitchBendCallCount = 0;
+        channelAftertouchCallCount = 0;
     }
-
-    midi::Synth& allocate(uint8_t midiNote) override {
-        lastQueriedMidiNote = midiNote;
-        voiceForCallCount++;
-        
-        // Simple voice allocation: each note has a dedicated voice for testing
-        lastAllocatedVoiceIndex = midiNote;
-        return *voices[midiNote];
-    }
-    
-    midi::Synth* findAllocated(uint8_t midiNote) override {
-        // For testing, just return the voice if it exists (simple 1:1 mapping)
-        if (midiNote < voices.size()) {
-            return voices[midiNote].get();
-        }
-        return nullptr;
-    }
-    
-    // Test access helpers
-    MockSynth* getVoice(size_t index) {
-        if (index < voices.size()) {
-            return voices[index].get();
-        }
-        return nullptr;
-    }
-    
-    MockSynth* getLastAllocatedVoice() {
-        return getVoice(lastAllocatedVoiceIndex);
-    }
-    
-    void forEachVoice(std::function<void(midi::Synth&)> func) override {
-        forEachVoiceCallCount++;
-        for (auto& voice : voices) {
-            func(*voice);
-        }
-    }
-        
-    // Test verification helpers
-    mutable uint8_t lastQueriedMidiNote = 0;
-    mutable size_t lastAllocatedVoiceIndex = 0;
-    
-    // Call counters
-    mutable int voiceForCallCount = 0;
-    mutable int forEachVoiceCallCount = 0;
-
-private:
-    std::vector<std::unique_ptr<MockSynth>> voices;
 };
 
 void setUp(void) {
@@ -152,13 +89,31 @@ void tearDown(void) {
 
 // Helper struct to hold test fixtures
 struct TestFixture {
-    MockSynthVoiceAllocator* allocator; // non-owning pointer; tied to processor lifetime
+    MockNoteTarget target;
     std::unique_ptr<midi::StreamProcessor> processor;
     
-    explicit TestFixture(uint8_t channel = 0, MockSynthVoiceAllocator::VoiceFactory voiceFactory = nullptr) {
-        auto allocatorPtr = std::make_unique<MockSynthVoiceAllocator>(voiceFactory);
-        allocator = allocatorPtr.get(); // Keep raw pointer for test access
-        processor = std::make_unique<midi::StreamProcessor>(std::move(allocatorPtr), channel);
+    // Track CC and Program Change callbacks
+    uint8_t lastCCNumber = 0;
+    uint8_t lastCCValue = 0;
+    int ccCallCount = 0;
+    
+    uint8_t lastProgram = 0;
+    int programChangeCallCount = 0;
+    
+    explicit TestFixture(uint8_t channel = 0) {
+        processor = std::make_unique<midi::StreamProcessor>(
+            target,
+            channel,
+            [this](uint8_t ch, uint8_t cc, uint8_t value) {
+                lastCCNumber = cc;
+                lastCCValue = value;
+                ccCallCount++;
+            },
+            [this](uint8_t ch, uint8_t program) {
+                lastProgram = program;
+                programChangeCallCount++;
+            }
+        );
     }
     
     midi::StreamProcessor& getProcessor() {
@@ -174,6 +129,14 @@ void sendNoteOnMessage(midi::StreamProcessor& processor, uint8_t channel, uint8_
     processor.process(velocity);
 }
 
+// Helper function to send a complete Note Off message
+void sendNoteOffMessage(midi::StreamProcessor& processor, uint8_t channel, uint8_t note, uint8_t velocity) {
+    uint8_t statusByte = 0x80 | channel; // Note Off command + channel
+    processor.process(statusByte);
+    processor.process(note);
+    processor.process(velocity);
+}
+
 // Helper function to send a complete Pitch Bend message
 void sendPitchBendMessage(midi::StreamProcessor& processor, uint8_t channel, uint16_t bendValue) {
     uint8_t statusByte = 0xE0 | channel; // Pitch Bend command + channel
@@ -184,26 +147,18 @@ void sendPitchBendMessage(midi::StreamProcessor& processor, uint8_t channel, uin
     processor.process(msb);
 }
 
-void test_noteOn_should_allocateASynthVoice(void) {
+void test_noteOn_should_callNoteTargetNoteOn(void) {
     // Arrange
     TestFixture fixture(0); // Channel 0
     
     // Act - Send a MIDI Note On message: 0x90 (Note On, Channel 0), 0x40 (E4), 0x7F (Max velocity)
     sendNoteOnMessage(fixture.getProcessor(), 0, 0x40, 0x7F);
     
-    // Assert - Verify voice allocator was called correctly
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, fixture.allocator->lastQueriedMidiNote, "Should query voice for MIDI note 0x40 (E4)");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.allocator->voiceForCallCount, "voiceFor should be called exactly once");
-    
-    // Assert - Verify the voice that was allocated had trigger called
-    MockSynth* voice = fixture.allocator->getLastAllocatedVoice();
-    TEST_ASSERT_NOT_NULL_MESSAGE(voice, "Should have allocated a voice");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, voice->triggerCallCount, "trigger should be called exactly once");
-    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.1f, 329.628f, voice->lastTriggerFrequency, "Should trigger with E4 frequency (MIDI note 0x40)");
-    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.01f, 1.0f, voice->lastTriggerVolume, "Should trigger with max volume");
-    
-    // Assert - Verify synth methods that should not be called
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, voice->releaseCallCount, "release should not be called for Note On");
+    // Assert - Verify NoteTarget received the note on
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, fixture.target.lastNoteOnNote, "Should receive note 0x40 (E4)");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x7F, fixture.target.lastNoteOnVelocity, "Should receive velocity 0x7F");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.target.noteOnCallCount, "noteOn should be called exactly once");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.target.noteOffCallCount, "noteOff should not be called for Note On");
 }
 
 void test_noteOn_shouldIgnoreWrongChannel(void) {
@@ -214,7 +169,7 @@ void test_noteOn_shouldIgnoreWrongChannel(void) {
     sendNoteOnMessage(fixture.getProcessor(), 0, 0x40, 0x7F);
     
     // Assert - Should ignore the message since it's on the wrong channel
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.allocator->voiceForCallCount, "voiceFor should not be called for wrong channel");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.target.noteOnCallCount, "noteOn should not be called for wrong channel");
 }
 
 void test_noteOn_shouldRespondToCorrectChannel(void) {
@@ -225,8 +180,8 @@ void test_noteOn_shouldRespondToCorrectChannel(void) {
     sendNoteOnMessage(fixture.getProcessor(), 1, 0x40, 0x7F);
     
     // Assert - Should respond to the message since it's on the correct channel
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, fixture.allocator->lastQueriedMidiNote, "Should query voice for MIDI note 0x40 (E4) on correct channel");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.allocator->voiceForCallCount, "voiceFor should be called exactly once");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, fixture.target.lastNoteOnNote, "Should receive note 0x40 (E4) on correct channel");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.target.noteOnCallCount, "noteOn should be called exactly once");
 }
 
 void test_runningStatus_shouldSendMultipleNotesWithoutRepeatingStatusByte(void) {
@@ -248,8 +203,8 @@ void test_runningStatus_shouldSendMultipleNotesWithoutRepeatingStatusByte(void) 
     fixture.getProcessor().process(0x42);
     fixture.getProcessor().process(0x7F);
     
-    // Assert - All three notes should have called voiceFor
-    TEST_ASSERT_EQUAL_INT_MESSAGE(3, fixture.allocator->voiceForCallCount, "Should call voiceFor for all three notes");
+    // Assert - All three notes should have triggered noteOn
+    TEST_ASSERT_EQUAL_INT_MESSAGE(3, fixture.target.noteOnCallCount, "Should call noteOn for all three notes");
 }
 
 void test_runningStatus_shouldBeInterruptedByNewStatusByte(void) {
@@ -268,15 +223,16 @@ void test_runningStatus_shouldBeInterruptedByNewStatusByte(void) {
     fixture.getProcessor().process(0x42); // This should be interpreted as another Note Off note
     fixture.getProcessor().process(0x7F);
     
-    // Assert - The Note Off and running status Note Off should both call voiceFor (incomplete Note On should not)
-    TEST_ASSERT_EQUAL_INT_MESSAGE(2, fixture.allocator->voiceForCallCount, "Note Off and running status Note Off should both call voiceFor");
+    // Assert - The Note Off and running status Note Off should both trigger noteOff (incomplete Note On should not)
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.target.noteOnCallCount, "Incomplete Note On should not call noteOn");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(2, fixture.target.noteOffCallCount, "Note Off and running status Note Off should both call noteOff");
 }
 
-void test_noteOff_shouldReleaseAllocatedVoice(void) {
+void test_noteOff_shouldCallNoteTargetNoteOff(void) {
     // Arrange
     TestFixture fixture(0); // Channel 0
 
-    // First allocate a voice with Note On
+    // First trigger a note with Note On
     sendNoteOnMessage(fixture.getProcessor(), 0, 0x40, 0x7F);
     
     // Act - Send a MIDI Note Off message: 0x80 (Note Off, Channel 0), 0x40 (E4), 0x7F (velocity)
@@ -284,34 +240,27 @@ void test_noteOff_shouldReleaseAllocatedVoice(void) {
     fixture.getProcessor().process(0x40); // Note number (E4)
     fixture.getProcessor().process(0x7F); // Release velocity
     
-    // Assert - Voice should have release called
-    TEST_ASSERT_EQUAL_INT_MESSAGE(2, fixture.allocator->voiceForCallCount, "voiceFor should be called twice (Note On + Note Off)");
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, fixture.allocator->lastQueriedMidiNote, "Should query the correct MIDI note");
-    
-    // Check that the allocated voice had release called
-    MockSynth* voice = fixture.allocator->getLastAllocatedVoice();
-    TEST_ASSERT_NOT_NULL_MESSAGE(voice, "Should have allocated a voice");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, voice->releaseCallCount, "release should be called exactly once");
+    // Assert - NoteTarget should receive the note off
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.target.noteOnCallCount, "noteOn should be called once");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.target.noteOffCallCount, "noteOff should be called once");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, fixture.target.lastNoteOffNote, "Should receive the correct note off");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x7F, fixture.target.lastNoteOffVelocity, "Should receive the correct release velocity");
 }
 
-void test_noteOnZeroVelocity_shouldReleaseAllocatedVoice(void) {
+void test_noteOnZeroVelocity_shouldCallNoteOff(void) {
     // Arrange
     TestFixture fixture(0); // Channel 0
 
-    // First allocate a voice with Note On
+    // First trigger a note with Note On
     sendNoteOnMessage(fixture.getProcessor(), 0, 0x40, 0x7F);
 
     // Act - Send a MIDI Note On message for the same channel and note, 0 velocity
     sendNoteOnMessage(fixture.getProcessor(), 0, 0x40, 0x00);
     
-    // Assert - Voice should have release called
-    TEST_ASSERT_EQUAL_INT_MESSAGE(2, fixture.allocator->voiceForCallCount, "voiceFor should be called twice (Note On + Note On with zero velocity)");
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, fixture.allocator->lastQueriedMidiNote, "Should query the correct MIDI note");
-    
-    // Check that the allocated voice had release called
-    MockSynth* voice = fixture.allocator->getLastAllocatedVoice();
-    TEST_ASSERT_NOT_NULL_MESSAGE(voice, "Should have allocated a voice");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, voice->releaseCallCount, "release should be called exactly once");
+    // Assert - NoteTarget should receive noteOff (Note On with velocity 0 is equivalent to Note Off)
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.target.noteOnCallCount, "noteOn should be called once (initial note)");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.target.noteOffCallCount, "noteOff should be called once (zero velocity)");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, fixture.target.lastNoteOffNote, "Should receive the correct note off");
 }
 
 void test_statusByteInterruption_shouldDiscardPartialMessage(void) {
@@ -330,15 +279,10 @@ void test_statusByteInterruption_shouldDiscardPartialMessage(void) {
     // Now send what would be running status data for Program Change
     fixture.getProcessor().process(0x41); // Should be interpreted as another Program Change
     
-    // Assert - The incomplete Note On should never trigger a voice
-    // Program Change messages should not call voiceFor
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.allocator->voiceForCallCount, "Incomplete Note On and Program Change should not call voiceFor");
-    
-    // Verify the voice for note 0x40 was never triggered or released
-    MockSynth* voice = fixture.allocator->getVoice(0x40);
-    TEST_ASSERT_NOT_NULL_MESSAGE(voice, "Voice should exist");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, voice->triggerCallCount, "Voice should not be triggered by incomplete Note On");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, voice->releaseCallCount, "Voice should not be released by incomplete Note On");
+    // Assert - The incomplete Note On should never trigger noteOn
+    // Program Change messages should not call noteOn
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.target.noteOnCallCount, "Incomplete Note On and Program Change should not call noteOn");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, fixture.target.noteOffCallCount, "Should not call noteOff either");
 }
 
 void test_systemRealTime_shouldNotInterruptPartialMessage(void) {
@@ -358,74 +302,26 @@ void test_systemRealTime_shouldNotInterruptPartialMessage(void) {
     fixture.getProcessor().process(0x7F); // Velocity
     
     // Assert - The Note On should complete successfully despite real-time interruptions
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.allocator->voiceForCallCount, "Note On should complete despite real-time interruptions");
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, fixture.allocator->lastQueriedMidiNote, "Should trigger the correct note");
-    
-    // Verify the voice was actually triggered
-    MockSynth* voice = fixture.allocator->getLastAllocatedVoice();
-    TEST_ASSERT_NOT_NULL_MESSAGE(voice, "Should have allocated a voice");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, voice->triggerCallCount, "Voice should be triggered");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.target.noteOnCallCount, "Note On should complete despite real-time interruptions");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x40, fixture.target.lastNoteOnNote, "Should trigger the correct note");
 }
 
-void test_pitchBend_shouldApplyToAllVoices(void) {
+void test_pitchBend_shouldCallNoteTargetPitchBend(void) {
     // Arrange
     TestFixture fixture(0); // Channel 0
     
-    // Allocate some voices with notes
+    // Trigger some notes
     sendNoteOnMessage(fixture.getProcessor(), 0, 0x40, 0x7F); // E4
     sendNoteOnMessage(fixture.getProcessor(), 0, 0x44, 0x7F); // G#4
     
-    // Reset the call count before sending pitch bend
-    fixture.allocator->forEachVoiceCallCount = 0;
-    
     // Act - Send pitch bend message: center (8192) + 2048 = 10240 (about +25% bend)
     sendPitchBendMessage(fixture.getProcessor(), 0, 10240);
     
-    // Assert - forEachVoice should be called to apply pitch bend to all voices
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.allocator->forEachVoiceCallCount, "forEachVoice should be called once");
+    // Assert - NoteTarget should receive the pitch bend
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, fixture.target.pitchBendCallCount, "pitchBend should be called once");
     
-    // Assert - Both allocated voices should have pitch bend applied
-    MockSynth* voice1 = fixture.allocator->getVoice(0x40); // E4 voice
-    MockSynth* voice2 = fixture.allocator->getVoice(0x44); // G#4 voice
-    
-    TEST_ASSERT_NOT_NULL_MESSAGE(voice1, "E4 voice should exist");
-    TEST_ASSERT_NOT_NULL_MESSAGE(voice2, "G#4 voice should exist");
-    
-    // Pitch bend value should be normalized: (10240 - 8192) / 8192 ≈ 0.25
-    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.01f, 0.25f, voice1->lastPitchBend, "E4 voice should have correct pitch bend");
-    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.01f, 0.25f, voice2->lastPitchBend, "G#4 voice should have correct pitch bend");
-    
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, voice1->setPitchBendCallCount, "E4 voice setPitchBend should be called once");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, voice2->setPitchBendCallCount, "G#4 voice setPitchBend should be called once");
-}
-
-void test_pitchBend_shouldRespectCustomPitchBendRange(void) {
-    // Arrange - Create voices with custom 12 semitone pitch bend range
-    auto customVoiceFactory = []() {
-        auto voice = std::make_unique<MockSynth>();
-        voice->setPitchBendRange(12.0f); // Full octave range
-        return voice;
-    };
-    
-    TestFixture fixture(0, customVoiceFactory); // Channel 0, custom voice factory
-    
-    // Allocate a voice with a note
-    sendNoteOnMessage(fixture.getProcessor(), 0, 0x40, 0x7F); // E4
-    
-    // Reset the call count before sending pitch bend
-    fixture.allocator->forEachVoiceCallCount = 0;
-    
-    // Act - Send pitch bend message: center (8192) + 2048 = 10240 (about +25% bend)
-    sendPitchBendMessage(fixture.getProcessor(), 0, 10240);
-    
-    // Assert - Voice should have the custom pitch bend range
-    MockSynth* voice = fixture.allocator->getVoice(0x40); // E4 voice
-    TEST_ASSERT_NOT_NULL_MESSAGE(voice, "E4 voice should exist");
-    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.01f, 12.0f, voice->pitchBendRange, "Voice should have custom 12 semitone pitch bend range");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, voice->setPitchBendRangeCallCount, "setPitchBendRange should have been called during voice creation");
-    
-    // Pitch bend value should still be normalized: (10240 - 8192) / 8192 ≈ 0.25
-    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.01f, 0.25f, voice->lastPitchBend, "Voice should have correct normalized pitch bend");
+    // Pitch bend value as 14-bit signed: 10240 - 8192 = 2048
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(2048, fixture.target.lastPitchBend, "Should receive correct pitch bend value");
 }
 
 // TODO test system common bytes
@@ -439,17 +335,16 @@ void test_pitchBend_shouldRespectCustomPitchBendRange(void) {
 
 void RUN_UNITY_TESTS() {
     UNITY_BEGIN();
-    RUN_TEST(test_noteOn_should_allocateASynthVoice);
+    RUN_TEST(test_noteOn_should_callNoteTargetNoteOn);
     RUN_TEST(test_noteOn_shouldIgnoreWrongChannel);
     RUN_TEST(test_noteOn_shouldRespondToCorrectChannel);
     RUN_TEST(test_runningStatus_shouldSendMultipleNotesWithoutRepeatingStatusByte);
     RUN_TEST(test_runningStatus_shouldBeInterruptedByNewStatusByte);
-    RUN_TEST(test_noteOff_shouldReleaseAllocatedVoice);
-    RUN_TEST(test_noteOnZeroVelocity_shouldReleaseAllocatedVoice);
+    RUN_TEST(test_noteOff_shouldCallNoteTargetNoteOff);
+    RUN_TEST(test_noteOnZeroVelocity_shouldCallNoteOff);
     RUN_TEST(test_statusByteInterruption_shouldDiscardPartialMessage);
     RUN_TEST(test_systemRealTime_shouldNotInterruptPartialMessage);
-    RUN_TEST(test_pitchBend_shouldApplyToAllVoices);
-    RUN_TEST(test_pitchBend_shouldRespectCustomPitchBendRange);
+    RUN_TEST(test_pitchBend_shouldCallNoteTargetPitchBend);
     UNITY_END();
 }
 

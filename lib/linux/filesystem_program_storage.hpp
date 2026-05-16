@@ -21,10 +21,10 @@ public:
     FilesystemProgramStorage(const char* basePath = "patches")
         : basePath_(basePath) {}
     
-    bool loadProgram(uint8_t program, midi::SynthVoiceAllocator& allocator) override {
+    bool loadProgram(uint8_t program, VoiceIterator forEachVoice) override {
         midi::ProgramData programData;
         
-        char filePath[256];
+        char filePath[512];
         snprintf(filePath, sizeof(filePath), "%s/bank_0/program_%d.json", basePath_, program);
         
         try {
@@ -32,7 +32,7 @@ public:
             if (!file.is_open()) {
                 // File doesn't exist - use defaults
                 logInfo("Program %d not found, using defaults", program);
-                midi::applyProgramToVoices(programData, allocator);
+                midi::applyProgramToVoices(programData, forEachVoice);
                 return false;
             }
             
@@ -40,20 +40,20 @@ public:
             file >> j;
             programData = j.get<midi::ProgramData>();
             
-            midi::applyProgramToVoices(programData, allocator);
+            midi::applyProgramToVoices(programData, forEachVoice);
             logInfo("Loaded program %d from %s", program, filePath);
             return true;
         } catch (const std::exception& e) {
             logError("Error loading program %d: %s", program, e.what());
             // Apply defaults on error
-            midi::applyProgramToVoices(programData, allocator);
+            midi::applyProgramToVoices(programData, forEachVoice);
             return false;
         }
     }
     
-    bool saveProgram(uint8_t program, midi::SynthVoiceAllocator& allocator) override {
+    bool saveProgram(uint8_t program, VoiceIterator forEachVoice) override {
         midi::ProgramData programData;
-        programData.captureFromVoices(allocator);
+        programData.captureFromVoices(forEachVoice);
         
         // Create directories if needed
         if (!ensureDirectoryExists(basePath_)) {
@@ -66,7 +66,7 @@ public:
             return false;
         }
         
-        char filePath[256];
+        char filePath[512];
         snprintf(filePath, sizeof(filePath), "%s/program_%d.json", bankPath, program);
         
         try {

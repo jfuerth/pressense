@@ -58,16 +58,15 @@ Example hookup on a Linux build (arrows indicate direction of API calls):
 ```mermaid
 flowchart LR
 linux::AlsaMidiIn-->midi::StreamProcessor
-midi::StreamProcessor-->midi::SimpleVoiceAllocator
-midi::StreamProcessor-->synth::WavetableSynth
+midi::StreamProcessor-->platform::PolyphonicSynthTarget
+platform::PolyphonicSynthTarget-->synth::WavetableSynth
 synth::WavetableSynth-->linux::AlsaPcmOut
 ```
 
 Notes:
-* `synth::WavetableSynth` implements `midi::Synth`
-* `midi::SimpleVoiceAllocator` implements `midi::SynthVoiceAllocator`.
-  * The voice allocator owns the instances of `synth::WavetableSynth` and manages their lifecycles based on which note triggered them
-  * `midi::SimpleVoiceAllocator` uses a factory function (supplied to its constructor) to create the Synth instances during construction
+* `synth::WavetableSynth` implements `synth::Voice` - a pure DSP interface with no MIDI concepts
+* `midi::StreamProcessor` parses MIDI bytes and routes note events to a `midi::NoteTarget`
+* `platform::PolyphonicSynthTarget` bridges MIDI and synth by implementing `midi::NoteTarget` and managing a pool of `synth::Voice` instances
 * Dynamic memory allocation is confined to setup and tear-down time; no heap allocations happen while the synths are running
 
 ## Build and Run

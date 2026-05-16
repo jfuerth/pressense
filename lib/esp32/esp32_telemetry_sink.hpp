@@ -75,7 +75,7 @@ public:
             // Wait for task to finish (with timeout)
             // Send dummy data to unblock task if it's waiting on queue
             if (queue_ != nullptr) {
-                midi::KeyScanStats dummy{};
+                TelemetryDataT dummy{};
                 xQueueOverwrite(queue_, &dummy);
             }
             

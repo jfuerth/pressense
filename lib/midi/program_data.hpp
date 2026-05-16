@@ -2,11 +2,16 @@
 
 #include <biquad_filter.hpp>
 #include <sawtooth_synth.hpp>
-#include <synth_voice_allocator.hpp>
+#include <voice.hpp>
 #include <cstdint>
+#include <functional>
 #include <json.hpp>  // nlohmann/json single-header
 
 namespace midi {
+
+// Type aliases matching features::ProgramStorage
+using VoiceVisitor = std::function<void(synth::Voice&)>;
+using VoiceIterator = std::function<void(VoiceVisitor)>;
 
 /**
  * @brief Program data structure for synth presets
@@ -36,11 +41,12 @@ struct ProgramData {
     float filterEnvRelease = 0.1f;
     
     /**
-     * @brief Capture current synth settings from voice allocator
+     * @brief Capture current synth settings from voices
+     * @param forEachVoice Function to iterate all voices
      */
-    void captureFromVoices(SynthVoiceAllocator& allocator) {
+    void captureFromVoices(VoiceIterator forEachVoice) {
         bool captured = false;
-        allocator.forEachVoice([&](Synth& voice) {
+        forEachVoice([&](synth::Voice& voice) {
             if (!captured) {
                 auto& ws = static_cast<synth::WavetableSynth&>(voice);
                 waveformShape = ws.getOscillator().getShape();
@@ -59,10 +65,12 @@ struct ProgramData {
 };
 
 /**
- * @brief Apply program data to all voices in allocator
+ * @brief Apply program data to all voices
+ * @param program Program data to apply
+ * @param forEachVoice Function to iterate all voices
  */
-inline void applyProgramToVoices(const ProgramData& program, SynthVoiceAllocator& allocator) {
-    allocator.forEachVoice([&program](Synth& voice) {
+inline void applyProgramToVoices(const ProgramData& program, VoiceIterator forEachVoice) {
+    forEachVoice([&program](synth::Voice& voice) {
         auto& ws = static_cast<synth::WavetableSynth&>(voice);
         
         // Apply oscillator settings

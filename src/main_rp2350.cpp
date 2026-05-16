@@ -20,6 +20,7 @@
 
 // Synth modules
 #include <synth_application.hpp>
+#include <sawtooth_synth.hpp>
 
 // MIDI keyboard controller
 #include <midi_keyboard_controller.hpp>
@@ -46,35 +47,22 @@ using MidiController = midi::MidiKeyboardController<NUM_KEYS>;
 // Global instances
 static AudioSink* audioSink = nullptr;
 static MidiController* keyboard = nullptr;
-static midi::StreamProcessor* midiProcessor = nullptr;
-
-/**
- * @brief MIDI callback - feeds bytes from keyboard controller to stream processor
- */
-void midiCallback(uint8_t midiByte) {
-    if (midiProcessor) {
-        midiProcessor->process(midiByte);
-    }
-}
+static platform::SynthApplication* synthApp = nullptr;
 
 /**
  * @brief Generate audio samples from all synth voices into the buffer
  */
 void generateAudio(int32_t* buffer, size_t length) {
+    // Use a temporary float buffer for SynthApplication
+    static float floatBuffer[BUFFER_SIZE * 2];  // Stereo
+    
+    synthApp->renderAudio(floatBuffer, length);
+    
+    // Convert stereo float to mono int32 (take left channel)
+    const float INTEGER_SCALE = 1073741824.0f; // 2^30
     for (size_t i = 0; i < length; i++) {
-        float mixedSample = 0.0f;
-        
-        // Sum all voice outputs
-        midiProcessor->forEachVoice([&mixedSample](midi::Synth& voice) {
-            mixedSample += static_cast<synth::WavetableSynth&>(voice).nextSample();
-        });
-        
-        // Scale down by number of voices to prevent clipping, then apply master volume
-        // Convert to 31-bit integer (PIO outputs 31 bits per channel)
-        const float INTEGER_SCALE = 1073741824.0f; // 2^30, since PIO outputs 31-bit signed samples
-        mixedSample = (mixedSample / static_cast<float>(NUM_VOICES)) * MASTER_VOLUME * INTEGER_SCALE;
-        
-        buffer[i] = static_cast<int32_t>(mixedSample);
+        float sample = floatBuffer[i * 2] * MASTER_VOLUME * INTEGER_SCALE;
+        buffer[i] = static_cast<int32_t>(sample);
     }
 }
 
@@ -120,7 +108,15 @@ int main() {
     printf("========================================\n");
     printf("CPU: RP2350 Cortex-M33 @ %lu MHz\n\n", clock_get_hz(clk_sys) / 1000000);
     
-    platform::SynthApplication synthApp = platform::SynthApplication(SAMPLE_RATE, 2, NUM_VOICES, std::make_unique<rp2350::EmbeddedProgramStorage>());
+    // Create synth application (handles voices, MIDI processing, audio rendering)
+    printf("Initializing %d-voice polyphonic synthesizer...\n", NUM_VOICES);
+    synthApp = new platform::SynthApplication(
+        SAMPLE_RATE, 
+        2,  // channels
+        NUM_VOICES, 
+        std::make_unique<rp2350::EmbeddedProgramStorage>()
+    );
+    printf("Synth initialized\n");
     
     // Set up a key scanner that feeds into the synth via MIDI events
     printf("Initializing PIO capacitive key scanner...\n");
@@ -142,30 +138,12 @@ int main() {
     }
     printf("Audio sink initialized\n");
     
-    // Initialize synth voice allocator with wavetable synths
-    printf("Initializing %d-voice polyphonic synthesizer...\n", NUM_VOICES);
-    auto voiceAllocator = std::make_unique<midi::SimpleVoiceAllocator>(
-        NUM_VOICES,
-        []() -> std::unique_ptr<midi::Synth> {
-            return std::make_unique<synth::WavetableSynth>(static_cast<float>(SAMPLE_RATE));
-        }
-    );
-    
-    // Create MIDI stream processor (owns the voice allocator)
-    midiProcessor = new midi::StreamProcessor(std::move(voiceAllocator));
-    
-    if (!midiProcessor) {
-        printf("ERROR: Failed to create MIDI processor!\n");
-        return 1;
-    }
-    printf("Synth initialized\n");
-    
     // Initialize MIDI keyboard controller with telemetry
     printf("Initializing MIDI keyboard controller...\n");
     auto telemetrySink = std::make_unique<rp2350::Rp2350TelemetrySink<midi::KeyScanStats<NUM_KEYS>>>();
     keyboard = new MidiController(
         *scanner,
-        midiCallback,
+        [](uint8_t byte) { synthApp->processMidiByte(byte); },
         std::move(telemetrySink),
         60,  // Base note C4
         100  // Velocity

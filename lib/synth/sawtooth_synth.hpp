@@ -1,6 +1,6 @@
 #pragma once
 
-#include <synth.hpp>
+#include <voice.hpp>
 #include <wavetable_oscillator.hpp>
 #include <adsr_envelope.hpp>
 #include <biquad_filter.hpp>
@@ -26,7 +26,7 @@ namespace synth {
  * Filter envelope modulates cutoff frequency relative to base cutoff (from timbre).
  * Filter envelope amount controls modulation depth.
  */
-class WavetableSynth : public midi::Synth {
+class WavetableSynth : public Voice {
 public:
     WavetableSynth(float sampleRate = 44100.0f) 
         : sampleRate_(sampleRate),

@@ -1,9 +1,8 @@
 #pragma once
 
-#include "synth.hpp"
-#include "synth_voice_allocator.hpp"
+#include "note_target.hpp"
 #include <functional>
-#include <memory>
+#include <cstdint>
 
 namespace midi {
 
@@ -16,6 +15,7 @@ static constexpr uint8_t NOTE_OFF_COMMAND = 0x80;
 static constexpr uint8_t POLY_AFTERTOUCH_COMMAND = 0xA0;
 static constexpr uint8_t CONTROL_CHANGE_COMMAND = 0xB0;
 static constexpr uint8_t PROGRAM_CHANGE_COMMAND = 0xC0;
+static constexpr uint8_t CHANNEL_AFTERTOUCH_COMMAND = 0xD0;
 static constexpr uint8_t PITCH_BEND_COMMAND = 0xE0;
 static constexpr uint8_t SYSTEM_REALTIME_MIN = 0xF8;
 static constexpr uint8_t SYSTEM_REALTIME_MAX = 0xFF;
@@ -23,101 +23,81 @@ static constexpr uint8_t SYSTEM_REALTIME_MAX = 0xFF;
 // Callback types for application-level MIDI control mapping
 
 /**
- * @brief Callback for control change messages (global voice control)
+ * @brief Callback for control change messages
  * @param channel MIDI channel (0-15)
  * @param cc Controller number (0-127)
  * @param value Controller value (0-127)
- * @param allocator Reference to voice allocator for forEachVoice() access
+ * 
+ * Application captures any context it needs (voice pool, etc.) in the callback.
  */
-using ControlChangeCallback =
-    std::function<void(uint8_t channel, uint8_t cc, uint8_t value, SynthVoiceAllocator &allocator)>;
-
-/**
- * @brief Callback for polyphonic aftertouch messages (per-voice control)
- * @param channel MIDI channel (0-15)
- * @param note MIDI note number (0-127)
- * @param pressure Aftertouch pressure (0-127)
- * @param voice Reference to the specific voice for this note
- */
-using PolyAftertouchCallback = std::function<void(uint8_t channel, uint8_t note, uint8_t pressure, Synth &voice)>;
+using ControlChangeCallback = std::function<void(uint8_t channel, uint8_t cc, uint8_t value)>;
 
 /**
  * @brief Callback for program change messages
  * @param channel MIDI channel (0-15)
  * @param program Program number (0-127)
- * @param allocator Reference to voice allocator for forEachVoice() access
+ * 
+ * Application captures any context it needs in the callback.
  */
-using ProgramChangeCallback = std::function<void(uint8_t channel, uint8_t program, SynthVoiceAllocator &allocator)>;
+using ProgramChangeCallback = std::function<void(uint8_t channel, uint8_t program)>;
 
 /**
- * @brief Concrete class for processing MIDI data streams
+ * @brief MIDI byte stream parser that routes events to a NoteTarget
  *
- * This class processes MIDI byte streams and routes them to a synthesizer
- * using a pluggable channel allocator for voice management. Control mapping
- * is delegated to application-level callbacks for flexibility.
+ * This class parses raw MIDI byte streams and routes note events to a
+ * NoteTarget implementation. Control change and program change messages
+ * are delegated to application-provided callbacks.
+ *
+ * The StreamProcessor is a pure MIDI parser - it has no knowledge of
+ * synthesizers, voices, or audio. The NoteTarget handles all note events,
+ * and the application handles control mapping via callbacks.
  */
 class StreamProcessor {
-  public:
+public:
     /**
-     * @brief Construct a StreamProcessor with custom synth and voice allocator
-     * @param voiceAllocator Unique pointer to the voice allocator implementation
+     * @brief Construct a StreamProcessor
+     * @param target Reference to the note target (must outlive this processor)
      * @param listenChannel MIDI channel to listen to (0-15)
      * @param ccCallback Optional callback for control change messages
-     * @param polyAftertouchCallback Optional callback for poly aftertouch messages
      * @param programChangeCallback Optional callback for program change messages
      */
-    StreamProcessor(std::unique_ptr<SynthVoiceAllocator> voiceAllocator, uint8_t listenChannel = 0,
-                    ControlChangeCallback ccCallback = nullptr, PolyAftertouchCallback polyAftertouchCallback = nullptr,
-                    ProgramChangeCallback programChangeCallback = nullptr);
+    StreamProcessor(
+        NoteTarget& target,
+        uint8_t listenChannel = 0,
+        ControlChangeCallback ccCallback = nullptr,
+        ProgramChangeCallback programChangeCallback = nullptr);
 
-    StreamProcessor(StreamProcessor &&other) = default;
-    StreamProcessor &operator=(StreamProcessor &&other) = default;
-    StreamProcessor(const StreamProcessor &) = delete;
-    StreamProcessor &operator=(const StreamProcessor &) = delete;
+    // Non-copyable, movable
+    StreamProcessor(StreamProcessor&& other) = default;
+    StreamProcessor& operator=(StreamProcessor&& other) = default;
+    StreamProcessor(const StreamProcessor&) = delete;
+    StreamProcessor& operator=(const StreamProcessor&) = delete;
 
-    /**
-     * @brief Destructor for proper cleanup
-     */
     ~StreamProcessor() = default;
 
     /**
      * @brief Process a single byte of MIDI data
      * @param data The MIDI data byte to process
      */
-    void process(const uint8_t data);
+    void process(uint8_t data);
 
-    /**
-     * @brief Iterate over all voices, whether active or not
-     * @param func Function to call for each voice
-     *
-     * Provides access to voices for audio rendering without exposing allocator.
-     */
-    void forEachVoice(std::function<void(Synth &)> func) { synthVoiceAllocator_->forEachVoice(func); }
-
-  private:
-    /**
-     * @brief Voice allocator for managing synthesizer voices
-     */
-    std::unique_ptr<SynthVoiceAllocator> synthVoiceAllocator_;
-
-    // Application-level control mapping callbacks
+private:
+    NoteTarget& target_;
+    
     ControlChangeCallback controlChangeCallback_;
-    PolyAftertouchCallback polyAftertouchCallback_;
     ProgramChangeCallback programChangeCallback_;
 
-    uint8_t listenChannel_ = 0; // MIDI channel to listen to (0-15)
+    uint8_t listenChannel_ = 0;
 
-    // State for Note On message parsing
     enum ProcessorState {
         Initial,
-        Need2Bytes, // Have received a valid status byte; waiting for data byte 1 of 2
-        Need1Byte,  // Have received a valid status byte; waiting for data byte 1 of 1 or 2 of 2
+        Need2Bytes,
+        Need1Byte,
     };
     ProcessorState processorState_ = Initial;
-    uint8_t currentCommand_ = 0; // Current MIDI command being processed
+    uint8_t currentCommand_ = 0;
     uint8_t messageByte1_ = 0;
 
-    // Private helper methods for MIDI processing
     static bool isStatusByte(uint8_t data);
     static bool isSystemRealTime(uint8_t data);
     static ProcessorState stateFromCommandByte(uint8_t command);
@@ -126,3 +106,4 @@ class StreamProcessor {
 };
 
 } // namespace midi
+

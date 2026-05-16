@@ -3,7 +3,6 @@
 #include <clipboard.hpp>
 #include <program_storage.hpp>
 #include <program_data.hpp>
-#include <synth_voice_allocator.hpp>
 #include <log.hpp>
 
 namespace linux {
@@ -21,8 +20,8 @@ public:
     /**
      * @brief Copy current voice settings to clipboard
      */
-    void copy(midi::SynthVoiceAllocator& allocator) override {
-        clipboard_.captureFromVoices(allocator);
+    void copy(VoiceIterator forEachVoice) override {
+        clipboard_.captureFromVoices(forEachVoice);
         hasData_ = true;
         logInfo("Copied current settings to clipboard");
     }
@@ -31,29 +30,30 @@ public:
      * @brief Paste clipboard contents to voices
      * @return true if clipboard had data to paste
      */
-    bool paste(midi::SynthVoiceAllocator& allocator) override {
+    bool paste(VoiceIterator forEachVoice) override {
         if (!hasData_) {
             logWarn("Clipboard is empty");
             return false;
         }
         
-        midi::applyProgramToVoices(clipboard_, allocator);
+        midi::applyProgramToVoices(clipboard_, forEachVoice);
         logInfo("Pasted clipboard to voices");
         return true;
     }
     
     /**
      * @brief Paste clipboard and save to program file
+     * @param forEachVoice Function to iterate all voices
      * @param program Program number to save to
      * @param storage Program storage implementation to use for saving
      * @return true if successful
      */
-    bool pasteAndSave(midi::SynthVoiceAllocator& allocator, uint8_t program, features::ProgramStorage& storage) override {
-        if (!paste(allocator)) {
+    bool pasteAndSave(VoiceIterator forEachVoice, uint8_t program, features::ProgramStorage& storage) override {
+        if (!paste(forEachVoice)) {
             return false;
         }
         
-        return storage.saveProgram(program, allocator);
+        return storage.saveProgram(program, forEachVoice);
     }
     
     bool hasData() const override { return hasData_; }

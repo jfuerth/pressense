@@ -18,16 +18,17 @@ class EmbeddedProgramStorage : public features::ProgramStorage {
 public:
     EmbeddedProgramStorage() = default;
     
-    bool loadProgram(uint8_t program, midi::SynthVoiceAllocator& allocator) override {
+    bool loadProgram(uint8_t program, VoiceIterator forEachVoice) override {
         // All program numbers load the same embedded default
         midi::ProgramData programData = getDefaultProgram();
-        midi::applyProgramToVoices(programData, allocator);
+        midi::applyProgramToVoices(programData, forEachVoice);
         logInfo("Loaded embedded default program (requested program %d)", program);
         return true;
     }
     
-    bool saveProgram(uint8_t program, midi::SynthVoiceAllocator& allocator) override {
+    bool saveProgram(uint8_t program, VoiceIterator forEachVoice) override {
         // Saving not supported on embedded platforms
+        (void)forEachVoice;  // Suppress unused parameter warning
         logWarn("Program save not supported on this platform (program %d)", program);
         return false;
     }
