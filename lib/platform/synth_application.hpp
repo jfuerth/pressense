@@ -4,7 +4,6 @@
 #include <stream_processor.hpp>
 #include <polyphonic_synth_target.hpp>
 #include <output_processor.hpp>
-#include <timing_stats.hpp>
 #include <log.hpp>
 #include <memory>
 #include <functional>
@@ -15,10 +14,6 @@
 
 #ifdef FEATURE_CLIPBOARD
 #include <clipboard.hpp>
-#endif
-
-#ifdef FEATURE_PERFORMANCE_TIMING
-#include <timing.hpp>
 #endif
 
 namespace platform {
@@ -48,9 +43,6 @@ public:
         , outputProcessor_(0.5f, static_cast<float>(sampleRate))
         , currentProgram_(1)
         , programStorage_(std::move(programStorage))
-#ifdef FEATURE_PERFORMANCE_TIMING
-        , platformTimer_()
-#endif
     {
         logInfo("Initializing synthesizer: %d Hz, %d voices", sampleRate_, maxVoices_);
         
@@ -100,10 +92,6 @@ public:
      * @param numFrames Number of frames to render
      */
     void renderAudio(float* buffer, unsigned int numFrames) {
-#ifdef FEATURE_PERFORMANCE_TIMING
-        platform::IntervalTimer<> timer;
-#endif
-        
         // Resize mono buffer if needed
         if (monoBuffer_.size() < numFrames) {
             monoBuffer_.resize(numFrames);
@@ -118,16 +106,8 @@ public:
             monoBuffer_[frame] = sample;
         }
         
-#ifdef FEATURE_PERFORMANCE_TIMING
-        timingVoiceMixing_.record(timer.elapsed());
-#endif
-        
         // Pass 2: Process with output processor
         outputProcessor_.processBuffer(monoBuffer_.data(), numFrames);
-        
-#ifdef FEATURE_PERFORMANCE_TIMING
-        timingOutputProcessing_.record(timer.elapsed());
-#endif
         
         // Pass 3: Duplicate mono to stereo
         for (unsigned int frame = 0; frame < numFrames; ++frame) {
@@ -135,41 +115,8 @@ public:
             buffer[frame * channels_ + 0] = processed;
             buffer[frame * channels_ + 1] = processed;
         }
-        
-#ifdef FEATURE_PERFORMANCE_TIMING
-        timingStereoDup_.record(timer.elapsed());
-#endif
     }
 
-    /**
-     * @brief Get timing statistics and reset counters
-     */
-    void getAndResetTimingStats(TimingStats& outVoiceMixing,
-                                 TimingStats& outOutputProcessing,
-                                 TimingStats& outStereoDup) {
-        outVoiceMixing = timingVoiceMixing_;
-        outOutputProcessing = timingOutputProcessing_;
-        outStereoDup = timingStereoDup_;
-        
-        timingVoiceMixing_.reset();
-        timingOutputProcessing_.reset();
-        timingStereoDup_.reset();
-    }
-    
-    /**
-     * @brief Access voice timing for aggregation
-     */
-    VoiceTimingStats getAndResetVoiceTimingStats() {
-        VoiceTimingStats combined;
-        
-        voicePool_->forEachVoice([&](synth::WavetableSynth& voice) {
-            auto voiceStats = voice.getAndResetVoiceTimingStats();
-            combined.merge(voiceStats);
-        });
-        
-        return combined;
-    }
-    
     /**
      * @brief Get the voice pool for direct access (e.g., for program loading)
      */
@@ -317,14 +264,6 @@ private:
     
 #ifdef FEATURE_CLIPBOARD
     std::unique_ptr<features::Clipboard> clipboard_;
-#endif
-    
-    TimingStats timingVoiceMixing_;
-    TimingStats timingOutputProcessing_;
-    TimingStats timingStereoDup_;
-
-#ifdef FEATURE_PERFORMANCE_TIMING
-    platform::PlatformTimer platformTimer_;
 #endif
 };
 
