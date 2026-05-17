@@ -3,6 +3,7 @@
 #include <esp32_telemetry_sink.hpp>
 #include <midi_keyboard_controller.hpp>
 #include <synth_application.hpp>
+#include <performance_timer.hpp>
 #include <log.hpp>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -49,6 +50,9 @@ static std::unique_ptr<esp32::I2sAudioSink> audioSink;
 void audioTask(void* parameter) {
     logInfo("Audio task started on core %d", xPortGetCoreID());
     
+    // Timer for performance measurement (NoOp for now - enable with Esp32TimingPolicy)
+    features::LapTimer<features::NoOpTimingPolicy, 4> timer;
+    
     // Main audio loop
     while (true) {
         // Process keyboard scan (called from audio loop, scanner runs in separate task)
@@ -57,7 +61,8 @@ void audioTask(void* parameter) {
         // Fill and write audio buffer
         audioSink->write([&](float* buffer, unsigned int numFrames) {
             // Render audio
-            synthApp->renderAudio(buffer, numFrames);
+            synthApp->renderAudio(buffer, numFrames, timer);
+            timer.end();
         });
     }
 }

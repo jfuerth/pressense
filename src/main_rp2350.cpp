@@ -16,10 +16,12 @@
 #include <pio_capacitive_scanner.hpp>
 #include <rp2350_audio_sink.hpp>
 #include <rp2350_telemetry_sink.hpp>
+#include <rp2350_timing_policy.hpp>
 #include <embedded_program_storage.hpp>
 
 // Synth modules
 #include <synth_application.hpp>
+#include <performance_timer.hpp>
 #include <sawtooth_synth.hpp>
 
 // MIDI keyboard controller
@@ -43,27 +45,40 @@ static constexpr float MASTER_VOLUME = 0.3f;  // Master volume scaling factor (0
 using Scanner = rp2350::PioCapacitiveScanner<FIRST_KEY_PIN, NUM_KEYS>;
 using AudioSink = rp2350::Rp2350AudioSink<BUFFER_SIZE>;
 using MidiController = midi::MidiKeyboardController<NUM_KEYS>;
+using AudioTimer = features::LapTimer<rp2350::Rp2350TimingPolicy, 8>;
+using AudioTimingStats = features::TimingStats<8>;
+
+// Telemetry emission interval (in audio frames)
+static constexpr uint32_t TIMING_TELEMETRY_INTERVAL = 100;  // ~every 0.5 seconds at 48kHz/256 frames
 
 // Global instances
 static AudioSink* audioSink = nullptr;
 static MidiController* keyboard = nullptr;
 static platform::SynthApplication* synthApp = nullptr;
+static rp2350::Rp2350TelemetrySink<AudioTimingStats>* timingSink = nullptr;
+
+// Shared state for cross-core timing telemetry
+// Core 1 writes stats here, core 0 reads and emits telemetry
+static volatile bool timingStatsReady = false;
+static AudioTimingStats sharedTimingStats;
 
 /**
  * @brief Generate audio samples from all synth voices into the buffer
  */
-void generateAudio(int32_t* buffer, size_t length) {
+void generateAudio(int32_t* buffer, size_t length, AudioTimer& timer) {
     // Use a temporary float buffer for SynthApplication
     static float floatBuffer[BUFFER_SIZE * 2];  // Stereo
     
-    synthApp->renderAudio(floatBuffer, length);
+    synthApp->renderAudio(floatBuffer, length, timer);
     
     // Convert stereo float to mono int32 (take left channel)
+    timer.nextSpan("float_to_int");
     const float INTEGER_SCALE = 1073741824.0f; // 2^30
     for (size_t i = 0; i < length; i++) {
         float sample = floatBuffer[i * 2] * MASTER_VOLUME * INTEGER_SCALE;
         buffer[i] = static_cast<int32_t>(sample);
     }
+    timer.end();
 }
 
 /**
@@ -76,8 +91,12 @@ void generateAudio(int32_t* buffer, size_t length) {
 void core1_audio_loop() {
     printf("Core 1: audio loop started\n");
 
+    // Timer for performance measurement
+    AudioTimer timer;
+    uint32_t frameCount = 0;
+    
     // Pre-fill the inactive buffer so it's ready when the first DMA completes
-    generateAudio(audioSink->getInactiveBuffer(), BUFFER_SIZE);
+    generateAudio(audioSink->getInactiveBuffer(), BUFFER_SIZE, timer);
 
     while (true) {
         // Wait for the current DMA transfer to complete
@@ -89,7 +108,20 @@ void core1_audio_loop() {
         audioSink->swapBuffers();
         
         // Now fill the new inactive buffer while DMA runs on the other one
-        generateAudio(audioSink->getInactiveBuffer(), BUFFER_SIZE);
+        generateAudio(audioSink->getInactiveBuffer(), BUFFER_SIZE, timer);
+        
+        // Periodically signal core 0 to emit timing telemetry
+        // (Don't do printf/JSON from core 1 - causes crashes)
+        if (++frameCount >= TIMING_TELEMETRY_INTERVAL) {
+            if (!timingStatsReady) {
+                // Copy stats to shared buffer for core 0 to emit
+                sharedTimingStats = timer.getStats();
+                __sync_synchronize();  // Memory barrier to ensure write is visible
+                timingStatsReady = true;
+            }
+            timer.reset();
+            frameCount = 0;
+        }
     }
 }
 
@@ -138,6 +170,10 @@ int main() {
     }
     printf("Audio sink initialized\n");
     
+    // Initialize timing telemetry sink
+    timingSink = new rp2350::Rp2350TelemetrySink<AudioTimingStats>();
+    printf("Timing telemetry sink initialized\n");
+    
     // Initialize MIDI keyboard controller with telemetry
     printf("Initializing MIDI keyboard controller...\n");
     auto telemetrySink = std::make_unique<rp2350::Rp2350TelemetrySink<midi::KeyScanStats<NUM_KEYS>>>();
@@ -160,7 +196,8 @@ int main() {
     printf("Calibrating... (this takes a few seconds)\n\n");
 
     // Pre-fill audio buffer before starting
-    generateAudio(audioSink->getInactiveBuffer(), BUFFER_SIZE);
+    AudioTimer initTimer;
+    generateAudio(audioSink->getInactiveBuffer(), BUFFER_SIZE, initTimer);
 
     // Start audio output
     printf("Starting audio output...\n");
@@ -175,6 +212,15 @@ int main() {
     
     // Core 0 runs the key scan loop
     while (true) {
+        // Check if core 1 has timing stats ready to emit
+        if (timingStatsReady) {
+            __sync_synchronize();  // Memory barrier to ensure we see the written data
+            if (timingSink) {
+                timingSink->sendTelemetry(sharedTimingStats);
+            }
+            timingStatsReady = false;
+        }
+        
         // Trigger a scan
         scanner->startScan();
         

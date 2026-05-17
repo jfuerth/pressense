@@ -224,6 +224,81 @@
             width: 30px;
             height: 3px;
         }
+        
+        .timing-panel {
+            background: #252526;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .timing-panel h2 {
+            margin-bottom: 15px;
+            color: #4ec9b0;
+            font-size: 16px;
+        }
+        
+        .timing-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .timing-meta {
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 11px;
+            color: #9cdcfe;
+        }
+        
+        .timing-span {
+            margin-bottom: 12px;
+        }
+        
+        .timing-span-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+        }
+        
+        .timing-span-name {
+            color: #dcdcaa;
+        }
+        
+        .timing-span-values {
+            color: #9cdcfe;
+        }
+        
+        .timing-bar-container {
+            height: 20px;
+            background: #1e1e1e;
+            border-radius: 3px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .timing-bar-minmax {
+            position: absolute;
+            height: 100%;
+            background: rgba(78, 201, 176, 0.2);
+            border-radius: 3px;
+        }
+        
+        .timing-bar-avg {
+            position: absolute;
+            height: 100%;
+            background: #4ec9b0;
+            border-radius: 3px;
+        }
+        
+        .timing-bar-max-marker {
+            position: absolute;
+            width: 2px;
+            height: 100%;
+            background: #d73a49;
+        }
     </style>
 </head>
 <body>
@@ -232,6 +307,14 @@
     <div class="controls">
         <button id="connectBtn">Connect to Serial Port</button>
         <div class="status disconnected" id="status">Disconnected</div>
+    </div>
+    
+    <div class="timing-panel" id="timingPanel" style="display: none;">
+        <div class="timing-header">
+            <h2>⏱️ Audio Timing</h2>
+            <div class="timing-meta" id="timingMeta">Waiting for data...</div>
+        </div>
+        <div id="timingBars"></div>
     </div>
     
     <div class="info-row">
@@ -303,6 +386,7 @@
         // Visualization state
         let telemetryData = null;
         let audioStats = null;
+        let timingData = null;
         let canvas = document.getElementById('canvas');
         let ctx = canvas.getContext('2d');
         let persistentMaxValue = 10;  // Start at 10, only increases
@@ -315,6 +399,9 @@
         const clearLogsBtn = document.getElementById('clearLogsBtn');
         const autoScrollCheckbox = document.getElementById('autoScrollCheckbox');
         const rawJsonEl = document.getElementById('rawJson');
+        const timingPanel = document.getElementById('timingPanel');
+        const timingMeta = document.getElementById('timingMeta');
+        const timingBars = document.getElementById('timingBars');
         
         // Connect/disconnect button handler
         connectBtn.addEventListener('click', async () => {
@@ -422,6 +509,10 @@
                                   `underruns=${data.underrunCount} partial=${data.partialWriteCount} core=${data.coreId}`;
                         addLog(msg);
                         return;
+                    } else if (data.type === 'timing') {
+                        timingData = data;
+                        updateTimingDisplay();
+                        return;  // Don't log timing telemetry
                     }
                     
                     // Valid JSON but not recognized telemetry type, log it
@@ -470,6 +561,81 @@
             html += `<span class="info-label">Active Notes:</span><span class="info-value">${activeNotes}</span>`;
             
             infoGridEl.innerHTML = html;
+        }
+        
+        // Update timing display with horizontal bars
+        function updateTimingDisplay() {
+            if (!timingData || !timingData.spans) return;
+            
+            // Show the timing panel
+            timingPanel.style.display = 'block';
+            
+            // Update metadata
+            const unit = timingData.unit || 'cycles';
+            timingMeta.textContent = `${timingData.lapCount} laps | Unit: ${unit}`;
+            
+            // Find the maximum value for scaling
+            let maxValue = 0;
+            for (const span of timingData.spans) {
+                if (span.max > maxValue) maxValue = span.max;
+            }
+            if (maxValue === 0) maxValue = 1;
+            
+            // Calculate total time for percentage display
+            let totalAvg = 0;
+            for (const span of timingData.spans) {
+                if (span.count > 0) {
+                    totalAvg += span.total / span.count;
+                }
+            }
+            
+            // Build HTML for timing bars
+            let html = '';
+            for (const span of timingData.spans) {
+                if (span.count === 0) continue;
+                
+                const avg = span.total / span.count;
+                const min = span.min;
+                const max = span.max;
+                
+                // Calculate percentages for bar widths (relative to max across all spans)
+                const avgPercent = (avg / maxValue) * 100;
+                const minPercent = (min / maxValue) * 100;
+                const maxPercent = (max / maxValue) * 100;
+                
+                // Calculate percentage of total time
+                const timePercent = totalAvg > 0 ? ((avg / totalAvg) * 100).toFixed(1) : '0.0';
+                
+                // Format numbers for display
+                const formatValue = (val) => {
+                    if (unit === 'cycles') {
+                        if (val >= 1000000) return (val / 1000000).toFixed(2) + 'M';
+                        if (val >= 1000) return (val / 1000).toFixed(1) + 'K';
+                        return Math.round(val).toString();
+                    } else {
+                        // Assume ns or us
+                        return Math.round(val).toString();
+                    }
+                };
+                
+                html += `
+                    <div class="timing-span">
+                        <div class="timing-span-header">
+                            <span class="timing-span-name">${escapeHtml(span.name)}</span>
+                            <span class="timing-span-values">
+                                avg: ${formatValue(avg)} | min: ${formatValue(min)} | max: ${formatValue(max)} | ${timePercent}%
+                            </span>
+                        </div>
+                        <div class="timing-bar-container">
+                            <div class="timing-bar-minmax" style="left: ${minPercent}%; width: ${maxPercent - minPercent}%;"></div>
+                            <div class="timing-bar-avg" style="width: ${avgPercent}%;"></div>
+                            <div class="timing-bar-max-marker" style="left: ${maxPercent}%;"></div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            timingBars.innerHTML = html;
         }
         
         // Render visualization

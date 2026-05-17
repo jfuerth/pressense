@@ -4,6 +4,7 @@
 #include <stream_processor.hpp>
 #include <polyphonic_synth_target.hpp>
 #include <output_processor.hpp>
+#include <performance_timer.hpp>
 #include <log.hpp>
 #include <memory>
 #include <functional>
@@ -88,16 +89,25 @@ public:
     
     /**
      * @brief Render audio buffer
+     * 
+     * @tparam TimingPolicy Policy class providing now() and unitName()
+     * @tparam MaxSpans Maximum number of span names the timer can track
      * @param buffer Output buffer (interleaved stereo)
      * @param numFrames Number of frames to render
+     * @param timer Lap timer for performance measurement. Span names are
+     *  implementation details but should be consistent for telemetry output.
+     *  Pass a NoOpTimingPolicy timer if timing is not needed.
      */
-    void renderAudio(float* buffer, unsigned int numFrames) {
+    template<typename TimingPolicy, size_t MaxSpans>
+    void renderAudio(float* buffer, unsigned int numFrames,
+                     features::LapTimer<TimingPolicy, MaxSpans>& timer) {
         // Resize mono buffer if needed
         if (monoBuffer_.size() < numFrames) {
             monoBuffer_.resize(numFrames);
         }
         
         // Pass 1: Mix all voices into mono buffer
+        timer.nextSpan("voice_synthesis");
         for (unsigned int frame = 0; frame < numFrames; ++frame) {
             float sample = 0.0f;
             voicePool_->forEachVoice([&sample](synth::WavetableSynth& synth) {
@@ -107,9 +117,11 @@ public:
         }
         
         // Pass 2: Process with output processor
+        timer.nextSpan("output_processing");
         outputProcessor_.processBuffer(monoBuffer_.data(), numFrames);
         
         // Pass 3: Duplicate mono to stereo
+        timer.nextSpan("stereo_dup");
         for (unsigned int frame = 0; frame < numFrames; ++frame) {
             float processed = monoBuffer_[frame];
             buffer[frame * channels_ + 0] = processed;

@@ -1,6 +1,7 @@
 #include <linux_audio_sink.hpp>
 #include <alsa_midi_in.hpp>
 #include <synth_application.hpp>
+#include <performance_timer.hpp>
 #include <log.hpp>
 #include <csignal>
 #include <atomic>
@@ -86,6 +87,9 @@ int app_main(const char* midiDevice) {
         logInfo("\nStarting audio/MIDI processing (Ctrl+C to stop)...");
         logInfo("Play notes on your MIDI device!");
         
+        // Timer for performance measurement (NoOp for now - enable with LinuxTimingPolicy)
+        features::LapTimer<features::NoOpTimingPolicy, 4> timer;
+        
         while (running) {
             // Fill and write audio buffer
             audioSink.write([&](float* buffer, unsigned int numFrames) {
@@ -95,7 +99,8 @@ int app_main(const char* midiDevice) {
                 });
                 
                 // Render audio
-                synth.renderAudio(buffer, numFrames);
+                synth.renderAudio(buffer, numFrames, timer);
+                timer.end();
             });
         }
         
