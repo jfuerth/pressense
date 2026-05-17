@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cmath>
 #include <memory>
+#include <type_traits>
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "hardware/clocks.h"
@@ -41,11 +42,17 @@ static constexpr uint8_t NUM_VOICES = 8;
 
 static constexpr float MASTER_VOLUME = 0.3f;  // Master volume scaling factor (0.0 to 1.0)
 
+static constexpr bool ENABLE_AUDIO_TIMING_TELEMETRY = false;  // Set to true to enable timing telemetry output (adds overhead)
+
 // Type aliases
 using Scanner = rp2350::PioCapacitiveScanner<FIRST_KEY_PIN, NUM_KEYS>;
 using AudioSink = rp2350::Rp2350AudioSink<BUFFER_SIZE>;
 using MidiController = midi::MidiKeyboardController<NUM_KEYS>;
-using AudioTimer = features::LapTimer<rp2350::Rp2350TimingPolicy, 12>;
+using AudioTimer = features::LapTimer<
+    std::conditional_t<ENABLE_AUDIO_TIMING_TELEMETRY,
+                       rp2350::Rp2350TimingPolicy,
+                       features::NoOpTimingPolicy>,
+    12>;
 using AudioTimingStats = features::TimingStats<12>;
 
 // Telemetry emission interval (in audio frames)
@@ -173,9 +180,11 @@ int main() {
     }
     printf("Audio sink initialized\n");
     
-    // Initialize timing telemetry sink
-    timingSink = new rp2350::Rp2350TelemetrySink<AudioTimingStats>();
-    printf("Timing telemetry sink initialized\n");
+    // Initialize timing telemetry sink (only if telemetry is enabled)
+    if constexpr (ENABLE_AUDIO_TIMING_TELEMETRY) {
+        timingSink = new rp2350::Rp2350TelemetrySink<AudioTimingStats>();
+        printf("Timing telemetry sink initialized\n");
+    }
     
     // Initialize MIDI keyboard controller with telemetry
     printf("Initializing MIDI keyboard controller...\n");
