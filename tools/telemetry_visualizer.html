@@ -251,53 +251,63 @@
             color: #9cdcfe;
         }
         
-        .timing-span {
+        .timing-stacked-bar {
+            display: flex;
+            height: 32px;
+            background: #1e1e1e;
+            border-radius: 4px;
+            overflow: hidden;
             margin-bottom: 12px;
         }
         
-        .timing-span-header {
+        .timing-segment {
+            height: 100%;
             display: flex;
-            justify-content: space-between;
-            margin-bottom: 4px;
+            align-items: center;
+            justify-content: center;
             font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 12px;
+            font-size: 11px;
+            color: #1e1e1e;
+            font-weight: bold;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            min-width: 0;
+            position: relative;
         }
         
-        .timing-span-name {
+        .timing-segment-label {
+            padding: 0 6px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .timing-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 11px;
+        }
+        
+        .timing-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .timing-legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+        }
+        
+        .timing-legend-name {
             color: #dcdcaa;
         }
         
-        .timing-span-values {
+        .timing-legend-values {
             color: #9cdcfe;
-        }
-        
-        .timing-bar-container {
-            height: 20px;
-            background: #1e1e1e;
-            border-radius: 3px;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .timing-bar-minmax {
-            position: absolute;
-            height: 100%;
-            background: rgba(78, 201, 176, 0.2);
-            border-radius: 3px;
-        }
-        
-        .timing-bar-avg {
-            position: absolute;
-            height: 100%;
-            background: #4ec9b0;
-            border-radius: 3px;
-        }
-        
-        .timing-bar-max-marker {
-            position: absolute;
-            width: 2px;
-            height: 100%;
-            background: #d73a49;
         }
     </style>
 </head>
@@ -563,7 +573,19 @@
             infoGridEl.innerHTML = html;
         }
         
-        // Update timing display with horizontal bars
+        // Color palette for timing segments
+        const timingColors = [
+            '#4ec9b0', // teal
+            '#569cd6', // blue
+            '#ce9178', // orange
+            '#c586c0', // purple
+            '#dcdcaa', // yellow
+            '#9cdcfe', // light blue
+            '#d7ba7d', // gold
+            '#608b4e', // green
+        ];
+        
+        // Update timing display with stacked horizontal bar
         function updateTimingDisplay() {
             if (!timingData || !timingData.spans) return;
             
@@ -572,14 +594,6 @@
             
             // Update metadata
             const unit = timingData.unit || 'cycles';
-            timingMeta.textContent = `${timingData.lapCount} laps | Unit: ${unit}`;
-            
-            // Find the maximum value for scaling
-            let maxValue = 0;
-            for (const span of timingData.spans) {
-                if (span.max > maxValue) maxValue = span.max;
-            }
-            if (maxValue === 0) maxValue = 1;
             
             // Calculate total time for percentage display
             let totalAvg = 0;
@@ -589,53 +603,56 @@
                 }
             }
             
-            // Build HTML for timing bars
-            let html = '';
+            // Format numbers for display
+            const formatValue = (val) => {
+                if (unit === 'cycles') {
+                    if (val >= 1000000) return (val / 1000000).toFixed(2) + 'M';
+                    if (val >= 1000) return (val / 1000).toFixed(1) + 'K';
+                    return Math.round(val).toString();
+                } else {
+                    return Math.round(val).toString();
+                }
+            };
+            
+            timingMeta.textContent = `${timingData.lapCount} laps | Total: ${formatValue(totalAvg)} ${unit}`;
+            
+            // Build HTML for stacked bar
+            let barHtml = '<div class="timing-stacked-bar">';
+            let legendHtml = '<div class="timing-legend">';
+            
+            let colorIndex = 0;
             for (const span of timingData.spans) {
                 if (span.count === 0) continue;
                 
                 const avg = span.total / span.count;
                 const min = span.min;
                 const max = span.max;
-                
-                // Calculate percentages for bar widths (relative to max across all spans)
-                const avgPercent = (avg / maxValue) * 100;
-                const minPercent = (min / maxValue) * 100;
-                const maxPercent = (max / maxValue) * 100;
+                const color = timingColors[colorIndex % timingColors.length];
                 
                 // Calculate percentage of total time
-                const timePercent = totalAvg > 0 ? ((avg / totalAvg) * 100).toFixed(1) : '0.0';
+                const timePercent = totalAvg > 0 ? (avg / totalAvg) * 100 : 0;
+                const timePercentStr = timePercent.toFixed(1);
                 
-                // Format numbers for display
-                const formatValue = (val) => {
-                    if (unit === 'cycles') {
-                        if (val >= 1000000) return (val / 1000000).toFixed(2) + 'M';
-                        if (val >= 1000) return (val / 1000).toFixed(1) + 'K';
-                        return Math.round(val).toString();
-                    } else {
-                        // Assume ns or us
-                        return Math.round(val).toString();
-                    }
-                };
+                // Build segment - show label if wide enough
+                const labelText = timePercent > 8 ? escapeHtml(span.name) : '';
+                barHtml += `<div class="timing-segment" style="flex: ${timePercent}; background: ${color};" title="${escapeHtml(span.name)}: avg ${formatValue(avg)}, min ${formatValue(min)}, max ${formatValue(max)}">`;
+                barHtml += `<span class="timing-segment-label">${labelText}</span>`;
+                barHtml += '</div>';
                 
-                html += `
-                    <div class="timing-span">
-                        <div class="timing-span-header">
-                            <span class="timing-span-name">${escapeHtml(span.name)}</span>
-                            <span class="timing-span-values">
-                                avg: ${formatValue(avg)} | min: ${formatValue(min)} | max: ${formatValue(max)} | ${timePercent}%
-                            </span>
-                        </div>
-                        <div class="timing-bar-container">
-                            <div class="timing-bar-minmax" style="left: ${minPercent}%; width: ${maxPercent - minPercent}%;"></div>
-                            <div class="timing-bar-avg" style="width: ${avgPercent}%;"></div>
-                            <div class="timing-bar-max-marker" style="left: ${maxPercent}%;"></div>
-                        </div>
-                    </div>
-                `;
+                // Build legend item
+                legendHtml += `<div class="timing-legend-item">`;
+                legendHtml += `<div class="timing-legend-color" style="background: ${color};"></div>`;
+                legendHtml += `<span class="timing-legend-name">${escapeHtml(span.name)}</span>`;
+                legendHtml += `<span class="timing-legend-values">${formatValue(avg)} (${timePercentStr}%)</span>`;
+                legendHtml += '</div>';
+                
+                colorIndex++;
             }
             
-            timingBars.innerHTML = html;
+            barHtml += '</div>';
+            legendHtml += '</div>';
+            
+            timingBars.innerHTML = barHtml + legendHtml;
         }
         
         // Render visualization

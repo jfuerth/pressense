@@ -99,6 +99,9 @@ void core1_audio_loop() {
     generateAudio(audioSink->getInactiveBuffer(), BUFFER_SIZE, timer);
 
     while (true) {
+        // Start measuring wait time for the next audio frame request
+        timer.nextSpan("wait_for_dma");
+        
         // Wait for the current DMA transfer to complete
         while (!audioSink->isTransferComplete()) {
             tight_loop_contents();
