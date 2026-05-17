@@ -364,7 +364,15 @@
         </div>
         
         <div class="raw-json-panel">
-            <h2>Latest Telemetry JSON</h2>
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <h2 style="margin: 0;">Latest JSON</h2>
+                <select id="jsonTypeSelect" style="background: #1e1e1e; color: #d4d4d4; border: 1px solid #444; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
+                    <option value="timing">timing</option>
+                    <option value="keyScan">keyScan</option>
+                    <option value="audio">audio</option>
+                </select>
+                <button id="copyJsonBtn" style="padding: 4px 10px; font-size: 12px;">📋 Copy</button>
+            </div>
             <div class="raw-json" id="rawJson">Waiting for data...</div>
         </div>
     </div>
@@ -409,9 +417,47 @@
         const clearLogsBtn = document.getElementById('clearLogsBtn');
         const autoScrollCheckbox = document.getElementById('autoScrollCheckbox');
         const rawJsonEl = document.getElementById('rawJson');
+        const jsonTypeSelect = document.getElementById('jsonTypeSelect');
+        const copyJsonBtn = document.getElementById('copyJsonBtn');
         const timingPanel = document.getElementById('timingPanel');
         const timingMeta = document.getElementById('timingMeta');
         const timingBars = document.getElementById('timingBars');
+        
+        // Store raw JSON for each type
+        const rawJsonData = {
+            keyScan: null,
+            audio: null,
+            timing: null
+        };
+        
+        // Update raw JSON display based on selected type
+        function updateRawJsonDisplay() {
+            const selectedType = jsonTypeSelect.value;
+            const data = rawJsonData[selectedType];
+            if (data) {
+                // Format JSON with arrays on single lines
+                const formatted = JSON.stringify(data, null, 2)
+                    .replace(/\[\s+/g, '[')
+                    .replace(/\s+\]/g, ']')
+                    .replace(/,\s{5}(?=\S)/g, ', ');
+                rawJsonEl.textContent = formatted;
+            } else {
+                rawJsonEl.textContent = `Waiting for ${selectedType} data...`;
+            }
+        }
+        
+        jsonTypeSelect.addEventListener('change', updateRawJsonDisplay);
+        
+        copyJsonBtn.addEventListener('click', async () => {
+            const text = rawJsonEl.textContent;
+            try {
+                await navigator.clipboard.writeText(text);
+                copyJsonBtn.textContent = '✓ Copied';
+                setTimeout(() => { copyJsonBtn.textContent = '📋 Copy'; }, 1500);
+            } catch (err) {
+                console.error('Failed to copy:', err);
+            }
+        });
         
         // Connect/disconnect button handler
         connectBtn.addEventListener('click', async () => {
@@ -500,19 +546,18 @@
                     // Check telemetry type using discriminator
                     if (data.type === 'keyScan') {
                         telemetryData = data;
-                        
-                        // Format JSON with arrays on single lines
-                        const formatted = JSON.stringify(data, null, 2)
-                            .replace(/\[\s+/g, '[')
-                            .replace(/\s+\]/g, ']')
-                            .replace(/,\s{5}(?=\S)/g, ', ');
-                        rawJsonEl.textContent = formatted;
-                        
+                        rawJsonData.keyScan = data;
+                        if (jsonTypeSelect.value === 'keyScan') {
+                            updateRawJsonDisplay();
+                        }
                         updateInfo();
                         return;  // Don't log telemetry
                     } else if (data.type === 'audio') {
                         audioStats = data;
-                        
+                        rawJsonData.audio = data;
+                        if (jsonTypeSelect.value === 'audio') {
+                            updateRawJsonDisplay();
+                        }
                         // Format audio stats as readable log message
                         const msg = `Audio stats: loop[avg=${data.avgLoopTime} us, max=${data.maxLoopTime} us, budget=${data.bufferDuration} us] ` +
                                   `scan[${data.avgScanTime} us] render[${data.avgRenderTime} us] ` +
@@ -521,6 +566,10 @@
                         return;
                     } else if (data.type === 'timing') {
                         timingData = data;
+                        rawJsonData.timing = data;
+                        if (jsonTypeSelect.value === 'timing') {
+                            updateRawJsonDisplay();
+                        }
                         updateTimingDisplay();
                         return;  // Don't log timing telemetry
                     }
@@ -573,17 +622,46 @@
             infoGridEl.innerHTML = html;
         }
         
-        // Color palette for timing segments
-        const timingColors = [
-            '#4ec9b0', // teal
-            '#569cd6', // blue
-            '#ce9178', // orange
-            '#c586c0', // purple
-            '#dcdcaa', // yellow
-            '#9cdcfe', // light blue
-            '#d7ba7d', // gold
-            '#608b4e', // green
-        ];
+        // Color families for timing span prefixes (grouped by hue)
+        const prefixColorFamilies = {
+            'synth:':  ['#1e90ff', '#4169e1', '#6495ed', '#87ceeb', '#00bfff', '#5f9ea0'],  // blues
+            'main:':   ['#ffd700', '#ffc107', '#ffb300', '#f9c513', '#d7ba7d', '#e6be8a'],  // yellows/golds
+            'app:':    ['#00c853', '#4caf50', '#66bb6a', '#81c784', '#608b4e', '#a5d6a7'],  // greens
+            'midi:':   ['#e040fb', '#ba68c8', '#c586c0', '#9c27b0', '#ab47bc', '#ce93d8'],  // purples
+            'input:':  ['#ff5722', '#ff7043', '#ce9178', '#ff8a65', '#d84315', '#ffab91'],  // oranges
+            'audio:':  ['#00bcd4', '#26c6da', '#4ec9b0', '#00acc1', '#80deea', '#84ffff'],  // teals
+        };
+        
+        // Fallback colors for unprefixed spans
+        const defaultColors = ['#9e9e9e', '#bdbdbd', '#757575', '#616161', '#424242', '#e0e0e0'];
+        
+        // Track which shade index to use per prefix
+        const prefixShadeIndex = {};
+        
+        // Get color for a span name based on its prefix
+        function getSpanColor(spanName) {
+            // Find matching prefix
+            for (const prefix in prefixColorFamilies) {
+                if (spanName.startsWith(prefix)) {
+                    const family = prefixColorFamilies[prefix];
+                    // Initialize or increment shade index for this prefix
+                    if (!(prefix in prefixShadeIndex)) {
+                        prefixShadeIndex[prefix] = 0;
+                    }
+                    const color = family[prefixShadeIndex[prefix] % family.length];
+                    prefixShadeIndex[prefix]++;
+                    return color;
+                }
+            }
+            
+            // No prefix match - use default colors
+            if (!('_default' in prefixShadeIndex)) {
+                prefixShadeIndex['_default'] = 0;
+            }
+            const color = defaultColors[prefixShadeIndex['_default'] % defaultColors.length];
+            prefixShadeIndex['_default']++;
+            return color;
+        }
         
         // Update timing display with stacked horizontal bar
         function updateTimingDisplay() {
@@ -592,15 +670,19 @@
             // Show the timing panel
             timingPanel.style.display = 'block';
             
+            // Reset prefix shade indices for fresh color assignment
+            for (const key in prefixShadeIndex) {
+                delete prefixShadeIndex[key];
+            }
+            
             // Update metadata
             const unit = timingData.unit || 'cycles';
+            const lapCount = timingData.lapCount || 1;
             
-            // Calculate total time for percentage display
-            let totalAvg = 0;
+            // Calculate total time per lap for percentage display
+            let totalPerLap = 0;
             for (const span of timingData.spans) {
-                if (span.count > 0) {
-                    totalAvg += span.total / span.count;
-                }
+                totalPerLap += span.total / lapCount;
             }
             
             // Format numbers for display
@@ -614,28 +696,27 @@
                 }
             };
             
-            timingMeta.textContent = `${timingData.lapCount} laps | Total: ${formatValue(totalAvg)} ${unit}`;
+            timingMeta.textContent = `${timingData.lapCount} laps | Total: ${formatValue(totalPerLap)} ${unit}/lap`;
             
             // Build HTML for stacked bar
             let barHtml = '<div class="timing-stacked-bar">';
             let legendHtml = '<div class="timing-legend">';
             
-            let colorIndex = 0;
             for (const span of timingData.spans) {
                 if (span.count === 0) continue;
                 
-                const avg = span.total / span.count;
+                const avgPerLap = span.total / lapCount;
                 const min = span.min;
                 const max = span.max;
-                const color = timingColors[colorIndex % timingColors.length];
+                const color = getSpanColor(span.name);
                 
-                // Calculate percentage of total time
-                const timePercent = totalAvg > 0 ? (avg / totalAvg) * 100 : 0;
+                // Calculate percentage of total time per lap
+                const timePercent = totalPerLap > 0 ? (avgPerLap / totalPerLap) * 100 : 0;
                 const timePercentStr = timePercent.toFixed(1);
                 
                 // Build segment - show label if wide enough
                 const labelText = timePercent > 8 ? escapeHtml(span.name) : '';
-                barHtml += `<div class="timing-segment" style="flex: ${timePercent}; background: ${color};" title="${escapeHtml(span.name)}: avg ${formatValue(avg)}, min ${formatValue(min)}, max ${formatValue(max)}">`;
+                barHtml += `<div class="timing-segment" style="flex: ${timePercent}; background: ${color};" title="${escapeHtml(span.name)}: ${formatValue(avgPerLap)}/lap, min ${formatValue(min)}, max ${formatValue(max)}">`;
                 barHtml += `<span class="timing-segment-label">${labelText}</span>`;
                 barHtml += '</div>';
                 
@@ -643,10 +724,8 @@
                 legendHtml += `<div class="timing-legend-item">`;
                 legendHtml += `<div class="timing-legend-color" style="background: ${color};"></div>`;
                 legendHtml += `<span class="timing-legend-name">${escapeHtml(span.name)}</span>`;
-                legendHtml += `<span class="timing-legend-values">${formatValue(avg)} (${timePercentStr}%)</span>`;
+                legendHtml += `<span class="timing-legend-values">${formatValue(avgPerLap)} (${timePercentStr}%)</span>`;
                 legendHtml += '</div>';
-                
-                colorIndex++;
             }
             
             barHtml += '</div>';

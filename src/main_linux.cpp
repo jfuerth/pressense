@@ -88,7 +88,7 @@ int app_main(const char* midiDevice) {
         logInfo("Play notes on your MIDI device!");
         
         // Timer for performance measurement (NoOp for now - enable with LinuxTimingPolicy)
-        features::LapTimer<features::NoOpTimingPolicy, 4> timer;
+        features::LapTimer<features::NoOpTimingPolicy, 12> timer;
         
         while (running) {
             // Fill and write audio buffer

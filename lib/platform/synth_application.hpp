@@ -107,21 +107,21 @@ public:
         }
         
         // Pass 1: Mix all voices into mono buffer
-        timer.nextSpan("voice_synthesis");
+        timer.nextSpan("app:voice_synthesis");
         for (unsigned int frame = 0; frame < numFrames; ++frame) {
             float sample = 0.0f;
-            voicePool_->forEachVoice([&sample](synth::WavetableSynth& synth) {
-                sample += synth.nextSample();
+            voicePool_->forEachVoice([&sample, &timer](synth::WavetableSynth& synth) {
+                sample += synth.nextSample(timer);
             });
             monoBuffer_[frame] = sample;
         }
         
         // Pass 2: Process with output processor
-        timer.nextSpan("output_processing");
+        timer.nextSpan("app:output_processing");
         outputProcessor_.processBuffer(monoBuffer_.data(), numFrames);
         
         // Pass 3: Duplicate mono to stereo
-        timer.nextSpan("stereo_dup");
+        timer.nextSpan("app:stereo_dup");
         for (unsigned int frame = 0; frame < numFrames; ++frame) {
             float processed = monoBuffer_[frame];
             buffer[frame * channels_ + 0] = processed;

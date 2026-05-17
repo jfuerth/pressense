@@ -51,7 +51,7 @@ void audioTask(void* parameter) {
     logInfo("Audio task started on core %d", xPortGetCoreID());
     
     // Timer for performance measurement (NoOp for now - enable with Esp32TimingPolicy)
-    features::LapTimer<features::NoOpTimingPolicy, 4> timer;
+    features::LapTimer<features::NoOpTimingPolicy, 12> timer;
     
     // Main audio loop
     while (true) {

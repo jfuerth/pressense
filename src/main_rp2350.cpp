@@ -45,8 +45,8 @@ static constexpr float MASTER_VOLUME = 0.3f;  // Master volume scaling factor (0
 using Scanner = rp2350::PioCapacitiveScanner<FIRST_KEY_PIN, NUM_KEYS>;
 using AudioSink = rp2350::Rp2350AudioSink<BUFFER_SIZE>;
 using MidiController = midi::MidiKeyboardController<NUM_KEYS>;
-using AudioTimer = features::LapTimer<rp2350::Rp2350TimingPolicy, 8>;
-using AudioTimingStats = features::TimingStats<8>;
+using AudioTimer = features::LapTimer<rp2350::Rp2350TimingPolicy, 12>;
+using AudioTimingStats = features::TimingStats<12>;
 
 // Telemetry emission interval (in audio frames)
 static constexpr uint32_t TIMING_TELEMETRY_INTERVAL = 100;  // ~every 0.5 seconds at 48kHz/256 frames
@@ -72,7 +72,7 @@ void generateAudio(int32_t* buffer, size_t length, AudioTimer& timer) {
     synthApp->renderAudio(floatBuffer, length, timer);
     
     // Convert stereo float to mono int32 (take left channel)
-    timer.nextSpan("float_to_int");
+    timer.nextSpan("main:float_to_int");
     const float INTEGER_SCALE = 1073741824.0f; // 2^30
     for (size_t i = 0; i < length; i++) {
         float sample = floatBuffer[i * 2] * MASTER_VOLUME * INTEGER_SCALE;
@@ -100,7 +100,7 @@ void core1_audio_loop() {
 
     while (true) {
         // Start measuring wait time for the next audio frame request
-        timer.nextSpan("wait_for_dma");
+        timer.nextSpan("main:wait_for_dma");
         
         // Wait for the current DMA transfer to complete
         while (!audioSink->isTransferComplete()) {
@@ -194,7 +194,7 @@ int main() {
     }
     
     // Enable telemetry output
-    keyboard->setTelemetryEnabled(true);
+    keyboard->setTelemetryEnabled(false);
     printf("Keyboard controller initialized\n");
     printf("Calibrating... (this takes a few seconds)\n\n");
 

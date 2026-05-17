@@ -115,9 +115,9 @@ struct NoOpTimingPolicy {
  * Usage:
  * @code
  * LapTimer<Esp32TimingPolicy, 8> timer;
- * timer.nextSpan("phase1");
+ * timer.nextSpan("module:phase1");
  * // ... code for phase1 ...
- * timer.nextSpan("phase2");
+ * timer.nextSpan("module:phase2");
  * // ... code for phase2 ...
  * timer.end();
  * 
@@ -142,7 +142,8 @@ public:
      * @brief End the previous span (if any) and start timing a new span
      * 
      * @tparam N Array size (deduced from string literal)
-     * @param literal Span name - must be a string literal or have static storage duration
+     * @param literal Span name - must be a string literal or have static storage duration.
+     * By convention, span names should use a "module:phase" format for clarity in telemetry output.
      */
     template<size_t N>
     void nextSpan(const char (&literal)[N]) {

@@ -4,6 +4,7 @@
 #include <wavetable_oscillator.hpp>
 #include <adsr_envelope.hpp>
 #include <biquad_filter.hpp>
+#include <performance_timer.hpp>
 #include <cmath>
 
 namespace synth {
@@ -133,39 +134,47 @@ public:
     
     /**
      * @brief Generate the next audio sample
+     * 
+     * @tparam TimingPolicy Policy class providing now() and unitName()
+     * @tparam MaxSpans Maximum number of span names the timer can track
+     * @param timer Lap timer for performance measurement. Span names use "synth:" prefix.
      * @return Audio sample in range [-1.0, 1.0]
      */
-    float nextSample() {
+    template<typename TimingPolicy, size_t MaxSpans>
+    float nextSample(features::LapTimer<TimingPolicy, MaxSpans>& timer) {
         if (!ampEnvelope_.isActive()) {
+            timer.nextSpan("synth:inactive");
             return 0.0f;
         }
         
         // Calculate current frequency with pitch bend (inline)
+        timer.nextSpan("synth:pitch_bend");
         float semitoneShift = pitchBend_ * pitchBendRange_;
         float frequency = baseFrequency_ * std::pow(2.0f, semitoneShift / 12.0f);
         
         // Generate oscillator sample
+        timer.nextSpan("synth:oscillator");
         float sample = oscillator_.nextSample(frequency);
         
         // Calculate filter cutoff with envelope modulation
         // baseCutoff_ is controlled directly via setter method; envelope adds modulation on top
         
         // Modulate cutoff with filter envelope
+        timer.nextSpan("synth:filter_env");
         float filterEnvLevel = filterEnvelope_.nextSample();
         float envModulation = filterEnvLevel * filterEnvAmount_;
         
         // Apply modulation (exponential, upward only)
         float modulatedCutoff = baseCutoff_ * (1.0f + envModulation * 9.0f);  // Up to 10x base cutoff
         
-        // PERF: This triggers coefficient recalculation every sample during envelope movement.
-        // If polyphony is limited on embedded (ESP32/RP2350), consider quantizing cutoff changes
-        // or rate-limiting updates (e.g., update filter every N samples, interpolate between).
+        timer.nextSpan("synth:filter");
         filter_.setCutoff(modulatedCutoff);
         
         // Apply filter
         sample = filter_.processSample(sample);
         
         // Apply amplitude envelope and volume
+        timer.nextSpan("synth:amp_env");
         float ampEnvLevel = ampEnvelope_.nextSample();
         sample *= ampEnvLevel * volume_;
         
