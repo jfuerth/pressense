@@ -19,6 +19,7 @@ High-level architecture, from input side to output side:
   * Currently one implementation: subtractive synthesizer with morphable Sawtooth/Triangle/Square waveforms
   * Reusable biquad filter, composable with envelope generator
   * Reusable ADSR envelope generator
+  * Reusable LFO (vibrato and tremolo) and aftertouch modulation of filter cutoff, filter envelope amount, and vibrato depth
   * Voice mixing with various clipping/distortion algorithms
   * There's room to implement other types of synth engines without worrying about note-to-voice allocation, mixdown, etc.
   * Future idea: could implement a tracker module that ignores the voice allocator and drives voices directly (one voice per track)
@@ -46,12 +47,17 @@ Higher-numbered items can depend on lower-numbered items, but not vice-versa.
 **Platform-Independent Implementation Code**
 * *lib/synth*: Platform-independent polyphonic subtractive synthesizer (DSP algorithms).
 * *lib/midi*: Platform-independent MIDI processor. Drives the synth voices.
+* *lib/webcontrol*: JSON command protocol and controller for the browser-based control panel (see *tools/*). Parses commands from a serial stream and manipulates synth voices, program storage, and keyboard settings.
 * *lib/nlohmann*: Third-party JSON input and output library (for storing synth presets).
 
 **Platform-Specific Implementation Code**
 * *lib/linux*: Linux implementations (ALSA MIDI/audio, filesystem program storage, preset clipboard).
 * *lib/esp32*: ESP32 implementations (I2S audio sink, embedded program storage, capacitive key scanning).
+* *lib/rp2350*: RP2350 (Raspberry Pi Pico 2) implementations.
 * *src/*: Main entry points. One per target OS/platform.
+
+**Browser-Based Tools**
+* *tools/pressence_ui.html* + *tools/js/*: Web Serial control panel and telemetry visualizer. Talks to the device over USB serial using the `lib/webcontrol` JSON protocol; lets you tweak voice parameters in real time, save/load programs, and monitor key-scan telemetry. See [tools/README_telemetry.md](tools/README_telemetry.md).
 
 Example hookup on a Linux build (arrows indicate direction of API calls):
 

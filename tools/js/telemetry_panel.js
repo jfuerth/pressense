@@ -2,7 +2,6 @@
  * Pressence Telemetry Panel
  * 
  * Key scan visualization and timing telemetry display.
- * Extracted from telemetry_visualizer.html for modular UI.
  */
 
 window.telemetryPanel = (function() {
