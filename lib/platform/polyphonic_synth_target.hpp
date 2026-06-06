@@ -84,10 +84,11 @@ public:
     void polyAftertouch(uint8_t note, uint8_t pressure) override {
         VoiceT* voice = findVoiceForNote(note);
         if (voice) {
-            // Map pressure to volume modulation
-            // This is a simple mapping; applications may want to customize
-            float volume = pressure / 127.0f;
-            voice->setVolume(volume);
+            // Pass normalized aftertouch to voice for modulation
+            // The voice uses this to modulate filter, vibrato, tremolo, etc.
+            // based on its aftertouch modulation settings
+            float aftertouch = pressure / 127.0f;
+            voice->setAftertouch(aftertouch);
         }
     }
 
@@ -100,11 +101,11 @@ public:
     }
 
     void channelAftertouch(uint8_t pressure) override {
-        // Apply to all voices
-        float volume = pressure / 127.0f;
+        // Apply aftertouch to all active voices
+        float aftertouch = pressure / 127.0f;
         for (auto& slot : voices_) {
             if (slot.isAllocated || slot.voice->isActive()) {
-                slot.voice->setVolume(volume);
+                slot.voice->setAftertouch(aftertouch);
             }
         }
     }

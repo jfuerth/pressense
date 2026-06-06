@@ -95,7 +95,7 @@ public:
     static constexpr uint16_t CALIBRATION_SCANS = 10;
     static constexpr float NOTE_ON_THRESHOLD = 2.0f;    // Ratio above baseline for note on
     static constexpr float NOTE_OFF_THRESHOLD = 1.5f;   // Ratio above baseline for note off (hysteresis)
-    static constexpr float MAX_PRESSURE_RATIO = 40.0f;   // Ratio for maximum aftertouch pressure
+    static constexpr float MAX_PRESSURE_RATIO = 5.0f;   // Ratio for maximum aftertouch pressure
     static constexpr float BASELINE_ALPHA = 0.001f;     // Exponential moving average factor
     static constexpr uint8_t AFTERTOUCH_DEADBAND = 2;   // Suppress small changes
     static constexpr float MIN_BASELINE = 1.0f;         // Minimum baseline to prevent ratio issues

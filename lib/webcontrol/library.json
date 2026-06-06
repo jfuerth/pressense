@@ -1,0 +1,8 @@
+{
+    "name": "webcontrol",
+    "version": "1.0.0",
+    "description": "Web-based control panel interface for Pressence synth",
+    "dependencies": {
+        "synth": "*"
+    }
+}

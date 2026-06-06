@@ -2,6 +2,7 @@
 
 #include <sawtooth_synth.hpp>
 #include <stream_processor.hpp>
+#include <web_controller.hpp>
 #include <polyphonic_synth_target.hpp>
 #include <output_processor.hpp>
 #include <performance_timer.hpp>
@@ -78,6 +79,22 @@ public:
         monoBuffer_.resize(256);
         
         logInfo("MIDI processor ready with %d voices", maxVoices_);
+        
+        // Create web controller for control panel communication
+        webController_ = std::make_unique<webcontrol::WebController>(
+            [this](auto visitor) { voicePool_->forEachVoice(visitor); },
+            programStorage_.get()
+        );
+    }
+    
+    /**
+     * @brief Set callback for base note changes
+     * 
+     * This allows external code (e.g. main) to hook into base note commands
+     * since the keyboard controller is not part of SynthApplication.
+     */
+    void setBaseNoteCallback(webcontrol::SetBaseNoteCallback callback) {
+        webController_->setBaseNoteCallback(std::move(callback));
     }
     
     /**
@@ -85,6 +102,25 @@ public:
      */
     void processMidiByte(uint8_t byte) {
         midiProcessor_->process(byte);
+    }
+    
+    /**
+     * @brief Process incoming command character (for serial input)
+     * @return true if a complete command was processed
+     */
+    bool processCommandChar(char ch) {
+        if (webController_->accumulate(ch)) {
+            webController_->process(webController_->getLineBuffer());
+            return true;
+        }
+        return false;
+    }
+    
+    /**
+     * @brief Process a complete command line
+     */
+    void processCommand(const char* jsonLine) {
+        webController_->process(jsonLine);
     }
     
     /**
@@ -266,6 +302,7 @@ private:
     
     std::unique_ptr<VoicePool> voicePool_;
     std::unique_ptr<midi::StreamProcessor> midiProcessor_;
+    std::unique_ptr<webcontrol::WebController> webController_;
     
     synth::OutputProcessor outputProcessor_;
     uint8_t currentProgram_;

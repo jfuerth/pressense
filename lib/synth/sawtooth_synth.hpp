@@ -4,6 +4,8 @@
 #include <wavetable_oscillator.hpp>
 #include <adsr_envelope.hpp>
 #include <biquad_filter.hpp>
+#include <lfo.hpp>
+#include <aftertouch_modulator.hpp>
 #include <performance_timer.hpp>
 #include <cmath>
 
@@ -17,10 +19,14 @@ namespace synth {
  * - BiquadFilter: Resonant lowpass filter
  * - AdsrEnvelope (amplitude): Volume envelope
  * - AdsrEnvelope (filter): Filter cutoff modulation envelope
+ * - Lfo (vibrato): Pitch modulation
+ * - Lfo (tremolo): Amplitude modulation
  * - Inline pitch bend processing
+ * - Per-voice aftertouch modulation
  * 
  * Filter envelope modulates cutoff frequency relative to base cutoff (from timbre).
  * Filter envelope amount controls modulation depth.
+ * Aftertouch can modulate filter cutoff, filter env amount, vibrato, and tremolo.
  */
 class WavetableSynth : public Voice {
 public:
@@ -29,7 +35,9 @@ public:
           oscillator_(sampleRate),
           filter_(sampleRate),
           ampEnvelope_(sampleRate),
-          filterEnvelope_(sampleRate) {
+          filterEnvelope_(sampleRate),
+          vibratoLfo_(sampleRate),
+          tremoloLfo_(sampleRate) {
         // Initialize filter with default settings
         filter_.setMode(BiquadFilter::Mode::LOWPASS);
         filter_.setQ(0.707f);  // Butterworth response
@@ -44,8 +52,11 @@ public:
     void trigger(float frequencyHz, float volume) override {
         baseFrequency_ = frequencyHz;
         volume_ = volume;
+        aftertouch_ = 0.0f;  // Reset aftertouch on new note
         oscillator_.reset();
         filter_.reset();  // Clear filter state for clean attack
+        vibratoLfo_.reset();
+        tremoloLfo_.reset();
         ampEnvelope_.trigger();
         filterEnvelope_.trigger();
     }
@@ -133,6 +144,83 @@ public:
     }
     
     /**
+     * @brief Get amplitude envelope for parameter control
+     */
+    AdsrEnvelope& getAmpEnvelope() {
+        return ampEnvelope_;
+    }
+    
+    // ===== Vibrato (pitch LFO) =====
+    
+    void setVibratoRate(float rateHz) {
+        vibratoLfo_.setRate(rateHz);
+    }
+    
+    float getVibratoRate() const {
+        return vibratoLfo_.getRate();
+    }
+    
+    void setVibratoDepth(float semitones) {
+        vibratoDepth_ = semitones;
+    }
+    
+    float getVibratoDepth() const {
+        return vibratoDepth_;
+    }
+    
+    // ===== Tremolo (amplitude LFO) =====
+    
+    void setTremoloRate(float rateHz) {
+        tremoloLfo_.setRate(rateHz);
+    }
+    
+    float getTremoloRate() const {
+        return tremoloLfo_.getRate();
+    }
+    
+    void setTremoloDepth(float depth) {
+        tremoloDepth_ = depth;
+        if (tremoloDepth_ < 0.0f) tremoloDepth_ = 0.0f;
+        if (tremoloDepth_ > 1.0f) tremoloDepth_ = 1.0f;
+    }
+    
+    float getTremoloDepth() const {
+        return tremoloDepth_;
+    }
+    
+    // ===== Aftertouch =====
+    
+    /**
+     * @brief Set per-voice aftertouch level
+     * @param aftertouch Normalized aftertouch [0.0, 1.0]
+     */
+    void setAftertouch(float aftertouch) {
+        aftertouch_ = aftertouch;
+        if (aftertouch_ < 0.0f) aftertouch_ = 0.0f;
+        if (aftertouch_ > 1.0f) aftertouch_ = 1.0f;
+    }
+    
+    float getAftertouch() const {
+        return aftertouch_;
+    }
+    
+    // ===== Aftertouch Modulation Amounts =====
+    // These control how much aftertouch affects each parameter
+    // Range: [-1.0, 1.0], 0 = no effect
+    
+    void setBaseCutoffAtMod(float amount) { baseCutoff_atMod_ = amount; }
+    float getBaseCutoffAtMod() const { return baseCutoff_atMod_; }
+    
+    void setFilterEnvAmountAtMod(float amount) { filterEnvAmount_atMod_ = amount; }
+    float getFilterEnvAmountAtMod() const { return filterEnvAmount_atMod_; }
+    
+    void setVibratoDepthAtMod(float amount) { vibratoDepth_atMod_ = amount; }
+    float getVibratoDepthAtMod() const { return vibratoDepth_atMod_; }
+    
+    void setTremoloDepthAtMod(float amount) { tremoloDepth_atMod_ = amount; }
+    float getTremoloDepthAtMod() const { return tremoloDepth_atMod_; }
+    
+    /**
      * @brief Generate the next audio sample
      * 
      * @tparam TimingPolicy Policy class providing now() and unitName()
@@ -147,9 +235,31 @@ public:
             return 0.0f;
         }
         
-        // Calculate current frequency with pitch bend (inline)
+        // Calculate aftertouch-modulated parameters
+        timer.nextSpan("synth:aftertouch");
+        float effectiveCutoff = baseCutoff_ * (1.0f + aftertouch_ * baseCutoff_atMod_);
+        float effectiveFilterEnvAmount = filterEnvAmount_ * (1.0f + aftertouch_ * filterEnvAmount_atMod_);
+        // Vibrato and tremolo use additive modulation (can start from 0)
+        float effectiveVibratoDepth = vibratoDepth_ + aftertouch_ * vibratoDepth_atMod_;
+        float effectiveTremoloDepth = tremoloDepth_ + aftertouch_ * tremoloDepth_atMod_;
+        
+        // Clamp values to valid ranges
+        if (effectiveCutoff < 20.0f) effectiveCutoff = 20.0f;
+        if (effectiveCutoff > 20000.0f) effectiveCutoff = 20000.0f;
+        if (effectiveFilterEnvAmount < 0.0f) effectiveFilterEnvAmount = 0.0f;
+        if (effectiveFilterEnvAmount > 1.0f) effectiveFilterEnvAmount = 1.0f;
+        if (effectiveVibratoDepth < 0.0f) effectiveVibratoDepth = 0.0f;
+        if (effectiveTremoloDepth < 0.0f) effectiveTremoloDepth = 0.0f;
+        if (effectiveTremoloDepth > 1.0f) effectiveTremoloDepth = 1.0f;
+        
+        // Calculate vibrato (pitch modulation)
+        timer.nextSpan("synth:vibrato");
+        vibratoLfo_.setDepth(effectiveVibratoDepth);
+        float vibratoMod = vibratoLfo_.nextSample();  // Returns semitone offset
+        
+        // Calculate current frequency with pitch bend and vibrato
         timer.nextSpan("synth:pitch_bend");
-        float semitoneShift = pitchBend_ * pitchBendRange_;
+        float semitoneShift = pitchBend_ * pitchBendRange_ + vibratoMod;
         float frequency = baseFrequency_ * std::pow(2.0f, semitoneShift / 12.0f);
         
         // Generate oscillator sample
@@ -157,15 +267,12 @@ public:
         float sample = oscillator_.nextSample(frequency);
         
         // Calculate filter cutoff with envelope modulation
-        // baseCutoff_ is controlled directly via setter method; envelope adds modulation on top
-        
-        // Modulate cutoff with filter envelope
         timer.nextSpan("synth:filter_env");
         float filterEnvLevel = filterEnvelope_.nextSample();
-        float envModulation = filterEnvLevel * filterEnvAmount_;
+        float envModulation = filterEnvLevel * effectiveFilterEnvAmount;
         
         // Apply modulation (exponential, upward only)
-        float modulatedCutoff = baseCutoff_ * (1.0f + envModulation * 9.0f);  // Up to 10x base cutoff
+        float modulatedCutoff = effectiveCutoff * (1.0f + envModulation * 9.0f);  // Up to 10x base cutoff
         
         timer.nextSpan("synth:filter");
         filter_.setCutoff(modulatedCutoff);
@@ -173,10 +280,16 @@ public:
         // Apply filter
         sample = filter_.processSample(sample);
         
-        // Apply amplitude envelope and volume
+        // Calculate tremolo (amplitude modulation)
+        timer.nextSpan("synth:tremolo");
+        tremoloLfo_.setDepth(effectiveTremoloDepth);
+        float tremoloMod = tremoloLfo_.nextSample();  // Returns [-depth, +depth]
+        float tremoloMultiplier = 1.0f + tremoloMod;  // Range: [1-depth, 1+depth]
+        
+        // Apply amplitude envelope, volume, and tremolo
         timer.nextSpan("synth:amp_env");
         float ampEnvLevel = ampEnvelope_.nextSample();
-        sample *= ampEnvLevel * volume_;
+        sample *= ampEnvLevel * volume_ * tremoloMultiplier;
         
         return sample;
     }
@@ -189,6 +302,8 @@ private:
     BiquadFilter filter_;
     AdsrEnvelope ampEnvelope_;
     AdsrEnvelope filterEnvelope_;
+    Lfo vibratoLfo_;
+    Lfo tremoloLfo_;
     
     // Voice parameters
     float baseFrequency_ = 440.0f;
@@ -197,6 +312,19 @@ private:
     float pitchBendRange_ = 2.0f;
     float baseCutoff_ = 1000.0f;    // Base filter cutoff (controlled by setter)
     float filterEnvAmount_ = 0.5f;  // 50% modulation by default
+    
+    // LFO parameters (depth stored separately for aftertouch modulation)
+    float vibratoDepth_ = 0.0f;     // Semitones
+    float tremoloDepth_ = 0.0f;     // 0-1 amplitude modulation
+    
+    // Per-voice aftertouch
+    float aftertouch_ = 0.0f;       // Normalized [0, 1]
+    
+    // Aftertouch modulation amounts [-1, 1]
+    float baseCutoff_atMod_ = 0.0f;
+    float filterEnvAmount_atMod_ = 0.0f;
+    float vibratoDepth_atMod_ = 0.0f;
+    float tremoloDepth_atMod_ = 0.0f;
 };
 
 } // namespace synth

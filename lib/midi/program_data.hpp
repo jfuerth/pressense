@@ -40,6 +40,27 @@ struct ProgramData {
     float filterEnvSustain = 0.3f;
     float filterEnvRelease = 0.1f;
     
+    // Amplitude envelope
+    float ampEnvAttack = 0.01f;
+    float ampEnvDecay = 0.05f;
+    float ampEnvSustain = 0.7f;
+    float ampEnvRelease = 0.1f;
+    
+    // Vibrato (pitch modulation)
+    float vibratoRate = 5.0f;    // Hz
+    float vibratoDepth = 0.0f;   // Semitones (0 = off)
+    
+    // Tremolo (amplitude modulation)
+    float tremoloRate = 5.0f;    // Hz
+    float tremoloDepth = 0.0f;   // 0-1 (0 = off)
+    
+    // Aftertouch modulation amounts [-1.0, 1.0]
+    // 0 = no effect, positive = increase with pressure, negative = decrease
+    float baseCutoff_atMod = 0.0f;
+    float filterEnvAmount_atMod = 0.0f;
+    float vibratoDepth_atMod = 0.0f;
+    float tremoloDepth_atMod = 0.0f;
+    
     /**
      * @brief Capture current synth settings from voices
      * @param forEachVoice Function to iterate all voices
@@ -58,6 +79,22 @@ struct ProgramData {
                 filterEnvDecay = ws.getFilterEnvelope().getDecayTime();
                 filterEnvSustain = ws.getFilterEnvelope().getSustainLevel();
                 filterEnvRelease = ws.getFilterEnvelope().getReleaseTime();
+                // Amplitude envelope
+                ampEnvAttack = ws.getAmpEnvelope().getAttackTime();
+                ampEnvDecay = ws.getAmpEnvelope().getDecayTime();
+                ampEnvSustain = ws.getAmpEnvelope().getSustainLevel();
+                ampEnvRelease = ws.getAmpEnvelope().getReleaseTime();
+                // Vibrato
+                vibratoRate = ws.getVibratoRate();
+                vibratoDepth = ws.getVibratoDepth();
+                // Tremolo
+                tremoloRate = ws.getTremoloRate();
+                tremoloDepth = ws.getTremoloDepth();
+                // Aftertouch modulation
+                baseCutoff_atMod = ws.getBaseCutoffAtMod();
+                filterEnvAmount_atMod = ws.getFilterEnvAmountAtMod();
+                vibratoDepth_atMod = ws.getVibratoDepthAtMod();
+                tremoloDepth_atMod = ws.getTremoloDepthAtMod();
                 captured = true;
             }
         });
@@ -87,6 +124,26 @@ inline void applyProgramToVoices(const ProgramData& program, VoiceIterator forEa
         ws.getFilterEnvelope().setDecayTime(program.filterEnvDecay);
         ws.getFilterEnvelope().setSustainLevel(program.filterEnvSustain);
         ws.getFilterEnvelope().setReleaseTime(program.filterEnvRelease);
+        
+        // Apply amplitude envelope settings
+        ws.getAmpEnvelope().setAttackTime(program.ampEnvAttack);
+        ws.getAmpEnvelope().setDecayTime(program.ampEnvDecay);
+        ws.getAmpEnvelope().setSustainLevel(program.ampEnvSustain);
+        ws.getAmpEnvelope().setReleaseTime(program.ampEnvRelease);
+        
+        // Apply vibrato settings
+        ws.setVibratoRate(program.vibratoRate);
+        ws.setVibratoDepth(program.vibratoDepth);
+        
+        // Apply tremolo settings
+        ws.setTremoloRate(program.tremoloRate);
+        ws.setTremoloDepth(program.tremoloDepth);
+        
+        // Apply aftertouch modulation settings
+        ws.setBaseCutoffAtMod(program.baseCutoff_atMod);
+        ws.setFilterEnvAmountAtMod(program.filterEnvAmount_atMod);
+        ws.setVibratoDepthAtMod(program.vibratoDepth_atMod);
+        ws.setTremoloDepthAtMod(program.tremoloDepth_atMod);
     });
 }
 
@@ -101,7 +158,23 @@ inline void to_json(nlohmann::json& j, const ProgramData& p) {
         {"filterEnvAttack", p.filterEnvAttack},
         {"filterEnvDecay", p.filterEnvDecay},
         {"filterEnvSustain", p.filterEnvSustain},
-        {"filterEnvRelease", p.filterEnvRelease}
+        {"filterEnvRelease", p.filterEnvRelease},
+        // Amplitude envelope
+        {"ampEnvAttack", p.ampEnvAttack},
+        {"ampEnvDecay", p.ampEnvDecay},
+        {"ampEnvSustain", p.ampEnvSustain},
+        {"ampEnvRelease", p.ampEnvRelease},
+        // Vibrato
+        {"vibratoRate", p.vibratoRate},
+        {"vibratoDepth", p.vibratoDepth},
+        // Tremolo
+        {"tremoloRate", p.tremoloRate},
+        {"tremoloDepth", p.tremoloDepth},
+        // Aftertouch modulation
+        {"baseCutoff_atMod", p.baseCutoff_atMod},
+        {"filterEnvAmount_atMod", p.filterEnvAmount_atMod},
+        {"vibratoDepth_atMod", p.vibratoDepth_atMod},
+        {"tremoloDepth_atMod", p.tremoloDepth_atMod}
     };
 }
 
@@ -117,6 +190,22 @@ inline void from_json(const nlohmann::json& j, ProgramData& p) {
     p.filterEnvDecay = j.value("filterEnvDecay", 0.2f);
     p.filterEnvSustain = j.value("filterEnvSustain", 0.3f);
     p.filterEnvRelease = j.value("filterEnvRelease", 0.1f);
+    // Amplitude envelope
+    p.ampEnvAttack = j.value("ampEnvAttack", 0.01f);
+    p.ampEnvDecay = j.value("ampEnvDecay", 0.05f);
+    p.ampEnvSustain = j.value("ampEnvSustain", 0.7f);
+    p.ampEnvRelease = j.value("ampEnvRelease", 0.1f);
+    // Vibrato
+    p.vibratoRate = j.value("vibratoRate", 5.0f);
+    p.vibratoDepth = j.value("vibratoDepth", 0.0f);
+    // Tremolo
+    p.tremoloRate = j.value("tremoloRate", 5.0f);
+    p.tremoloDepth = j.value("tremoloDepth", 0.0f);
+    // Aftertouch modulation
+    p.baseCutoff_atMod = j.value("baseCutoff_atMod", 0.0f);
+    p.filterEnvAmount_atMod = j.value("filterEnvAmount_atMod", 0.0f);
+    p.vibratoDepth_atMod = j.value("vibratoDepth_atMod", 0.0f);
+    p.tremoloDepth_atMod = j.value("tremoloDepth_atMod", 0.0f);
 }
 
 } // namespace midi

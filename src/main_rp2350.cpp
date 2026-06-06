@@ -193,7 +193,7 @@ int main() {
         *scanner,
         [](uint8_t byte) { synthApp->processMidiByte(byte); },
         std::move(telemetrySink),
-        60,  // Base note C4
+        48,  // Base note C3 (one octave lower than C4)
         100  // Velocity
     );
     
@@ -201,6 +201,13 @@ int main() {
         printf("ERROR: Failed to create keyboard controller!\n");
         return 1;
     }
+    
+    // Wire up base note callback so control panel can change keyboard base note
+    synthApp->setBaseNoteCallback([](uint8_t note) {
+        if (keyboard) {
+            keyboard->setBaseNote(note);
+        }
+    });
     
     // Enable telemetry output
     keyboard->setTelemetryEnabled(false);
@@ -231,6 +238,12 @@ int main() {
                 timingSink->sendTelemetry(sharedTimingStats);
             }
             timingStatsReady = false;
+        }
+        
+        // Check for incoming serial commands (non-blocking)
+        int ch = getchar_timeout_us(0);
+        if (ch != PICO_ERROR_TIMEOUT) {
+            synthApp->processCommandChar(static_cast<char>(ch));
         }
         
         // Trigger a scan

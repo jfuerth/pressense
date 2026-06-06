@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pressence Control Panel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        /* Header */
+        .header {
+            background: #252526;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            border-bottom: 1px solid #3c3c3c;
+        }
+        
+        .header h1 {
+            color: #4ec9b0;
+            font-size: 20px;
+            flex: 1;
+        }
+        
+        .connect-btn {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .connect-btn:hover {
+            background: #1177bb;
+        }
+        
+        .connect-btn:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .status.disconnected { background: #d73a49; }
+        .status.connected { background: #28a745; }
+        .status.connecting { background: #f9c513; color: #1e1e1e; }
+        
+        /* Tabs */
+        .tabs {
+            display: flex;
+            background: #2d2d2d;
+            border-bottom: 1px solid #3c3c3c;
+        }
+        
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            color: #888;
+            transition: all 0.2s;
+        }
+        
+        .tab:hover {
+            color: #d4d4d4;
+            background: #333;
+        }
+        
+        .tab.active {
+            color: #4ec9b0;
+            border-bottom-color: #4ec9b0;
+        }
+        
+        /* Tab Content */
+        .tab-content {
+            display: none;
+            flex: 1;
+            overflow: auto;
+            padding: 20px;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        /* Control Panel Styles */
+        .param-group {
+            background: #252526;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .param-group h3 {
+            color: #4ec9b0;
+            font-size: 14px;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #3c3c3c;
+        }
+        
+        .knobs-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        
+        .dual-knob-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .knob-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .knob-container.at-mod-knob {
+            transform: scale(0.7);
+            margin-top: -5px;
+        }
+        
+        .knob-label {
+            font-size: 11px;
+            color: #888;
+            text-transform: uppercase;
+        }
+        
+        .knob-wrapper {
+            position: relative;
+        }
+        
+        .knob {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #404040, #2a2a2a);
+            border: 2px solid #555;
+            cursor: grab;
+            position: relative;
+            transition: border-color 0.2s;
+        }
+        
+        .knob:hover {
+            border-color: #4ec9b0;
+        }
+        
+        .knob.active {
+            cursor: grabbing;
+            border-color: #4ec9b0;
+            box-shadow: 0 0 10px rgba(78, 201, 176, 0.3);
+        }
+        
+        .knob-indicator {
+            position: absolute;
+            width: 4px;
+            height: 15px;
+            background: #4ec9b0;
+            top: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-radius: 2px;
+        }
+        
+        .knob-value {
+            font-family: 'Consolas', monospace;
+            font-size: 11px;
+            color: #9cdcfe;
+            min-width: 50px;
+            text-align: center;
+        }
+        
+        .at-mod-knob .knob {
+            width: 35px;
+            height: 35px;
+        }
+        
+        .at-mod-knob .knob-indicator {
+            height: 10px;
+            width: 3px;
+            top: 4px;
+        }
+        
+        .at-mod-knob .knob-label {
+            font-size: 9px;
+            color: #ce9178;
+        }
+        
+        /* Telemetry Panel Styles */
+        .telemetry-row {
+            display: flex;
+            gap: 20px;
+            height: 300px;
+            margin-bottom: 15px;
+        }
+        
+        .visualization-panel {
+            flex: 2;
+            background: #252526;
+            border-radius: 8px;
+            padding: 10px;
+        }
+        
+        .visualization-panel canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        
+        .info-side {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .info-panel, .timing-panel {
+            background: #252526;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        
+        .info-panel h3, .timing-panel h3 {
+            color: #4ec9b0;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 5px 10px;
+            font-size: 12px;
+            font-family: 'Consolas', monospace;
+        }
+        
+        .info-label { color: #9cdcfe; }
+        .info-value { color: #ce9178; }
+        
+        .timing-bar {
+            display: flex;
+            height: 20px;
+            background: #1e1e1e;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        
+        .timing-segment {
+            height: 100%;
+        }
+        
+        .timing-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            font-size: 10px;
+            font-family: 'Consolas', monospace;
+        }
+        
+        .timing-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        .timing-color {
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+        }
+        
+        .log-panel {
+            background: #252526;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            max-height: 200px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .log-header h3 {
+            color: #4ec9b0;
+            font-size: 14px;
+        }
+        
+        .log-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            font-size: 12px;
+        }
+        
+        .log-controls button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        
+        .logs {
+            flex: 1;
+            background: #1e1e1e;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-y: auto;
+            font-family: 'Consolas', monospace;
+            font-size: 11px;
+            white-space: pre-wrap;
+        }
+        
+        .raw-json-panel {
+            background: #252526;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        
+        .raw-json-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .raw-json-header h3 {
+            color: #4ec9b0;
+            font-size: 14px;
+        }
+        
+        .raw-json-header select {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            border: 1px solid #3c3c3c;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        
+        .raw-json {
+            background: #1e1e1e;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'Consolas', monospace;
+            font-size: 11px;
+            color: #ce9178;
+            overflow-x: auto;
+            white-space: pre;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        
+        /* Program Panel */
+        .program-panel {
+            background: #252526;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .program-panel h3 {
+            color: #4ec9b0;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        
+        .program-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .program-controls select {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            border: 1px solid #3c3c3c;
+            padding: 6px 10px;
+            border-radius: 4px;
+        }
+        
+        .program-controls button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .program-controls button:hover {
+            background: #1177bb;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎹 Pressence Control Panel</h1>
+        <button class="connect-btn" id="connectBtn">Connect</button>
+        <div class="status disconnected" id="status">Disconnected</div>
+    </div>
+    
+    <div class="tabs">
+        <div class="tab active" data-tab="control">Control Panel</div>
+        <div class="tab" data-tab="telemetry">Telemetry</div>
+    </div>
+    
+    <div class="tab-content active" id="tab-control">
+        <div class="program-panel">
+            <h3>Program</h3>
+            <div class="program-controls">
+                <label>Bank: <select id="bankSelect">
+                    <option value="0">0</option>
+                    <option value="1">1</option>
+                </select></label>
+                <label>Program: <select id="programSelect">
+                    <option value="0">0</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6">6</option>
+                    <option value="7">7</option>
+                </select></label>
+                <button id="loadProgramBtn">Load</button>
+                <button id="saveProgramBtn">Save</button>
+                <button id="refreshParamsBtn">Refresh</button>
+            </div>
+        </div>
+        <div class="program-panel">
+            <h3>Keyboard</h3>
+            <div class="program-controls">
+                <label>Base Note: <select id="baseNoteSelect"></select></label>
+            </div>
+        </div>
+        <div id="controlPanelContainer"></div>
+    </div>
+    
+    <div class="tab-content" id="tab-telemetry">
+        <div id="telemetryContainer"></div>
+    </div>
+    
+    <script src="js/serial_connection.js"></script>
+    <script src="js/control_panel.js"></script>
+    <script src="js/telemetry_panel.js"></script>
+    <script>
+        // UI Elements
+        const connectBtn = document.getElementById('connectBtn');
+        const statusEl = document.getElementById('status');
+        const tabs = document.querySelectorAll('.tab');
+        const tabContents = document.querySelectorAll('.tab-content');
+        
+        // Initialize panels
+        controlPanel.init(document.getElementById('controlPanelContainer'));
+        telemetryPanel.init(document.getElementById('telemetryContainer'));
+        
+        // Tab switching
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                tabContents.forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+            });
+        });
+        
+        // Serial connection
+        serialManager.setStatusCallback((status, message) => {
+            statusEl.className = 'status ' + status;
+            statusEl.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+            connectBtn.textContent = status === 'connected' ? 'Disconnect' : 'Connect';
+            
+            if (status === 'connected') {
+                // Request current params on connect
+                setTimeout(() => serialManager.getParams(), 500);
+            }
+        });
+        
+        serialManager.setLineCallback((line, parsed) => {
+            // Log non-JSON or unrecognized messages
+            if (!parsed) {
+                telemetryPanel.addLog(line);
+                return;
+            }
+            
+            // Route to appropriate handler
+            telemetryPanel.processJson(parsed);
+        });
+        
+        connectBtn.addEventListener('click', async () => {
+            if (serialManager.isConnected()) {
+                await serialManager.disconnect();
+            } else {
+                await serialManager.connect();
+            }
+        });
+        
+        // Program controls
+        document.getElementById('loadProgramBtn').addEventListener('click', () => {
+            const bank = parseInt(document.getElementById('bankSelect').value);
+            const program = parseInt(document.getElementById('programSelect').value);
+            serialManager.loadProgram(bank, program);
+        });
+        
+        document.getElementById('saveProgramBtn').addEventListener('click', () => {
+            const bank = parseInt(document.getElementById('bankSelect').value);
+            const program = parseInt(document.getElementById('programSelect').value);
+            serialManager.saveProgram(bank, program);
+        });
+        
+        document.getElementById('refreshParamsBtn').addEventListener('click', () => {
+            serialManager.getParams();
+        });
+        
+        // Base note control
+        const baseNoteSelect = document.getElementById('baseNoteSelect');
+        const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        // Populate C1 (24) to C6 (84) - reasonable keyboard range
+        for (let note = 24; note <= 84; note++) {
+            const octave = Math.floor(note / 12) - 1;
+            const noteName = noteNames[note % 12] + octave;
+            const option = document.createElement('option');
+            option.value = note;
+            option.textContent = noteName + ' (' + note + ')';
+            if (note === 48) option.selected = true; // Default C3
+            baseNoteSelect.appendChild(option);
+        }
+        
+        baseNoteSelect.addEventListener('change', () => {
+            const note = parseInt(baseNoteSelect.value);
+            serialManager.send({ cmd: 'setBaseNote', note: note });
+        });
+        
+        // Check Web Serial support
+        if (!serialManager.isSupported()) {
+            connectBtn.disabled = true;
+            statusEl.textContent = 'Web Serial not supported';
+            telemetryPanel.addLog('Web Serial API not supported. Use Chrome, Edge, or Opera.', true);
+        }
+    </script>
+</body>
+</html>
