@@ -96,6 +96,23 @@ public:
     void setBaseNoteCallback(webcontrol::SetBaseNoteCallback callback) {
         webController_->setBaseNoteCallback(std::move(callback));
     }
+
+    /**
+     * @brief Set callbacks for the keyboard aftertouch input range
+     *
+     * Like the base note, the aftertouch range lives in the keyboard controller,
+     * which is not owned by SynthApplication, so these forward to the web
+     * controller's callback hooks.
+     */
+    void setAftertouchMinRatioCallback(webcontrol::SetAftertouchRatioCallback callback) {
+        webController_->setAftertouchMinRatioCallback(std::move(callback));
+    }
+    void setAftertouchMaxRatioCallback(webcontrol::SetAftertouchRatioCallback callback) {
+        webController_->setAftertouchMaxRatioCallback(std::move(callback));
+    }
+    void setAftertouchRangeProvider(webcontrol::GetAftertouchRangeCallback callback) {
+        webController_->setAftertouchRangeProvider(std::move(callback));
+    }
     
     /**
      * @brief Process incoming MIDI byte

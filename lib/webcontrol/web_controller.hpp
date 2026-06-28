@@ -21,6 +21,15 @@ namespace webcontrol {
 using SetBaseNoteCallback = std::function<void(uint8_t note)>;
 
 /**
+ * @brief Callbacks for the keyboard aftertouch input range
+ *
+ * These live in the keyboard controller, which (like the base note) is not part
+ * of WebController, so they are reached via callbacks supplied by main.
+ */
+using SetAftertouchRatioCallback = std::function<void(float ratio)>;
+using GetAftertouchRangeCallback = std::function<void(float& minRatio, float& maxRatio)>;
+
+/**
  * @brief Type aliases for voice iteration (same pattern as ProgramStorage)
  */
 using VoiceVisitor = std::function<void(synth::Voice&)>;
@@ -157,6 +166,19 @@ public:
         onSetBaseNote_ = std::move(callback);
     }
 
+    /**
+     * @brief Set callbacks for the keyboard aftertouch input range
+     */
+    void setAftertouchMinRatioCallback(SetAftertouchRatioCallback callback) {
+        onSetAftertouchMinRatio_ = std::move(callback);
+    }
+    void setAftertouchMaxRatioCallback(SetAftertouchRatioCallback callback) {
+        onSetAftertouchMaxRatio_ = std::move(callback);
+    }
+    void setAftertouchRangeProvider(GetAftertouchRangeCallback callback) {
+        onGetAftertouchRange_ = std::move(callback);
+    }
+
 private:
     bool handleSetParam(const nlohmann::json& j) {
         if (!j.contains("param") || !j.contains("value")) {
@@ -281,6 +303,13 @@ private:
         else if (param == "tremoloDepth_atMod") {
             forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setTremoloDepthAtMod(value); });
         }
+        // Keyboard aftertouch input range (lives in the keyboard controller)
+        else if (param == "aftertouchMinRatio") {
+            if (onSetAftertouchMinRatio_) onSetAftertouchMinRatio_(value);
+        }
+        else if (param == "aftertouchMaxRatio") {
+            if (onSetAftertouchMaxRatio_) onSetAftertouchMaxRatio_(value);
+        }
         else {
             logWarn("Unknown parameter: %s", param.c_str());
         }
@@ -318,6 +347,14 @@ private:
                 captured = true;
             }
         });
+        // Keyboard aftertouch range comes from the keyboard controller, not the
+        // voices. Fallbacks (used when no provider is wired) match the keyboard's
+        // compile-time defaults.
+        params.aftertouchMinRatio = 5.0f;
+        params.aftertouchMaxRatio = 10.0f;
+        if (onGetAftertouchRange_) {
+            onGetAftertouchRange_(params.aftertouchMinRatio, params.aftertouchMaxRatio);
+        }
         nlohmann::json j = params;
         printf("%s\n", j.dump().c_str());
     }
@@ -381,6 +418,9 @@ private:
     VoiceIterator voiceIterator_;
     features::ProgramStorage* programStorage_;
     SetBaseNoteCallback onSetBaseNote_;
+    SetAftertouchRatioCallback onSetAftertouchMinRatio_;
+    SetAftertouchRatioCallback onSetAftertouchMaxRatio_;
+    GetAftertouchRangeCallback onGetAftertouchRange_;
     
     // Line accumulation buffer
     char lineBuffer_[512] = {0};

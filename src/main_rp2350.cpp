@@ -230,6 +230,20 @@ int main() {
             keyboard->setBaseNote(note);
         }
     });
+
+    // Wire up aftertouch range knobs so the control panel can tune touch response
+    synthApp->setAftertouchMinRatioCallback([](float ratio) {
+        if (keyboard) keyboard->setAftertouchMinRatio(ratio);
+    });
+    synthApp->setAftertouchMaxRatioCallback([](float ratio) {
+        if (keyboard) keyboard->setAftertouchMaxRatio(ratio);
+    });
+    synthApp->setAftertouchRangeProvider([](float& minRatio, float& maxRatio) {
+        if (keyboard) {
+            minRatio = keyboard->getAftertouchMinRatio();
+            maxRatio = keyboard->getAftertouchMaxRatio();
+        }
+    });
     
     // Enable telemetry output
     keyboard->setTelemetryEnabled(true);

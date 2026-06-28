@@ -95,9 +95,11 @@ public:
     static constexpr uint16_t CALIBRATION_SCANS = 10;
     static constexpr float NOTE_ON_THRESHOLD = 2.0f;    // Ratio above baseline for note on
     static constexpr float NOTE_OFF_THRESHOLD = 1.5f;   // Ratio above baseline for note off (hysteresis)
-    static constexpr float MAX_PRESSURE_RATIO = 10.0f;  // Ratio for maximum aftertouch pressure (hard press measures ~11-12)
+    // Runtime-tunable aftertouch input range (defaults; adjustable via the control panel)
+    static constexpr float DEFAULT_AFTERTOUCH_MIN_RATIO = 5.0f;  // Ratio where aftertouch begins; below this it stays 0
+    static constexpr float DEFAULT_AFTERTOUCH_MAX_RATIO = 10.0f; // Ratio for maximum aftertouch (hard press measures ~11-12)
+    static constexpr float AFTERTOUCH_GAMMA = 2.5f;     // Response curve: >1 = slow ramp at first, then steep toward max
     static constexpr float BASELINE_ALPHA = 0.001f;     // Exponential moving average factor
-    static constexpr uint8_t AFTERTOUCH_DEADBAND = 2;   // Suppress small changes
     static constexpr float MIN_BASELINE = 1.0f;         // Minimum baseline to prevent ratio issues
     
     /**
@@ -240,7 +242,26 @@ public:
     bool isTelemetryEnabled() const {
         return telemetryEnabled_;
     }
-    
+
+    /**
+     * @brief Set the pressure ratio at which aftertouch begins
+     *
+     * Below this ratio the key produces no aftertouch (output stays 0).
+     */
+    void setAftertouchMinRatio(float ratio) {
+        aftertouchMinRatio_ = ratio;
+    }
+
+    /**
+     * @brief Set the pressure ratio that maps to maximum aftertouch (127)
+     */
+    void setAftertouchMaxRatio(float ratio) {
+        aftertouchMaxRatio_ = ratio;
+    }
+
+    float getAftertouchMinRatio() const { return aftertouchMinRatio_; }
+    float getAftertouchMaxRatio() const { return aftertouchMaxRatio_; }
+
 private:
     KeyScanner& scanner_;
     std::function<void(uint8_t)> midiCallback_;
@@ -260,7 +281,11 @@ private:
     
     // Telemetry
     bool telemetryEnabled_;
-    
+
+    // Runtime-tunable aftertouch input range (set from the control panel)
+    float aftertouchMinRatio_ = DEFAULT_AFTERTOUCH_MIN_RATIO;
+    float aftertouchMaxRatio_ = DEFAULT_AFTERTOUCH_MAX_RATIO;
+
     /**
      * @brief Process a single key and generate MIDI events
      */
@@ -307,14 +332,20 @@ private:
                     MIN_BASELINE
                 );
             } else {
-                // Polyphonic Aftertouch: map pressure to 0-127
-                // Linear mapping: NOTE_OFF_THRESHOLD = 0, MAX_PRESSURE_RATIO = 127
-                float pressure = (ratio - NOTE_OFF_THRESHOLD) / (MAX_PRESSURE_RATIO - NOTE_OFF_THRESHOLD);
+                // Polyphonic Aftertouch: map pressure ratio to 0-127.
+                // Normalize aftertouchMinRatio_..aftertouchMaxRatio_ to 0..1
+                // (so light touches below the onset stay silent), then apply a
+                // gamma curve for a slow-then-steep response.
+                float range = aftertouchMaxRatio_ - aftertouchMinRatio_;
+                float pressure = (range > 0.0f) ? (ratio - aftertouchMinRatio_) / range : 0.0f;
                 pressure = std::max(0.0f, std::min(1.0f, pressure));
-                uint8_t aftertouch = static_cast<uint8_t>(pressure * 127.0f);
+                float shaped = std::pow(pressure, AFTERTOUCH_GAMMA);
+                uint8_t aftertouch = static_cast<uint8_t>(shaped * 127.0f);
                 
-                // Only send if changed by more than deadband
-                if (std::abs(static_cast<int>(aftertouch) - static_cast<int>(lastAftertouch_[keyIndex])) > AFTERTOUCH_DEADBAND) {
+                // Send on any change. The mains-averaged signal is clean enough
+                // that a deadband isn't needed - and a deadband strands the value
+                // a couple of LSB above 0 until the key fully releases.
+                if (aftertouch != lastAftertouch_[keyIndex]) {
                     sendPolyAftertouch(midiNote, aftertouch);
                     lastAftertouch_[keyIndex] = aftertouch;
                 }

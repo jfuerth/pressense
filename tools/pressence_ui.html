@@ -551,7 +551,7 @@
         const baseNoteSelect = document.getElementById('baseNoteSelect');
         const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
         // Populate C1 (24) to C6 (84) - reasonable keyboard range
-        for (let note = 24; note <= 84; note++) {
+        for (let note = 84; note >= 24; note--) {
             const octave = Math.floor(note / 12) - 1;
             const noteName = noteNames[note % 12] + octave;
             const option = document.createElement('option');

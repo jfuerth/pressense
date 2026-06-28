@@ -7,6 +7,10 @@
 window.controlPanel = (function() {
     // Parameter definitions with ranges and display settings
     const PARAMS = {
+        // Aftertouch (keyboard touch response): pressure ratio that maps to 0..127
+        aftertouchMinRatio: { min: 1, max: 9, default: 5, label: 'AT Min', unit: '', hasAtMod: false },
+        aftertouchMaxRatio: { min: 2, max: 15, default: 10, label: 'AT Max', unit: '', hasAtMod: false },
+
         // Oscillator
         waveformShape: { min: 0, max: 1, default: 0, label: 'Waveform', unit: '', hasAtMod: false },
         
@@ -330,12 +334,13 @@ window.controlPanel = (function() {
         
         // Create parameter groups
         const groups = [
+            { title: 'Aftertouch', params: ['aftertouchMinRatio', 'aftertouchMaxRatio'] },
             { title: 'Oscillator', params: ['waveformShape'] },
             { title: 'Filter', params: ['baseCutoff', 'filterQ'] },
             { title: 'Filter Envelope', params: ['filterEnvAmount', 'filterEnvAttack', 'filterEnvDecay', 'filterEnvSustain', 'filterEnvRelease'] },
             { title: 'Amp Envelope', params: ['ampEnvAttack', 'ampEnvDecay', 'ampEnvSustain', 'ampEnvRelease'] },
             { title: 'Vibrato', params: ['vibratoRate', 'vibratoDepth'] },
-            { title: 'Tremolo', params: ['tremoloRate', 'tremoloDepth'] }
+            { title: 'Tremolo', params: ['tremoloRate', 'tremoloDepth'] },
         ];
         
         for (const group of groups) {
