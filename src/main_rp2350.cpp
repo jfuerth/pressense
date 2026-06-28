@@ -12,6 +12,7 @@
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "hardware/clocks.h"
+#include "hardware/vreg.h"
 
 // Platform-specific implementations
 #include <pio_capacitive_scanner.hpp>
@@ -28,6 +29,10 @@
 // MIDI keyboard controller
 #include <midi_keyboard_controller.hpp>
 
+// System clock: overclock to 300 MHz (2x the RP2350's 150 MHz default spec).
+// Requires a core-voltage bump to stay stable; see main().
+static constexpr uint32_t TARGET_SYS_CLOCK_KHZ = 300000;
+
 // Audio configuration
 static constexpr uint32_t SAMPLE_RATE = 48000;
 static constexpr size_t BUFFER_SIZE = 256;
@@ -40,7 +45,7 @@ static constexpr uint8_t FIRST_KEY_PIN = 0;
 static constexpr uint8_t NUM_KEYS = 32;
 static constexpr uint8_t NUM_VOICES = 8;
 
-static constexpr float MASTER_VOLUME = 0.3f;  // Master volume scaling factor (0.0 to 1.0)
+static constexpr float MASTER_VOLUME = 0.05f;  // Master volume scaling factor (0.0 to 1.0)
 
 static constexpr bool ENABLE_AUDIO_TIMING_TELEMETRY = false;  // Set to true to enable timing telemetry output (adds overhead)
 
@@ -136,6 +141,14 @@ void core1_audio_loop() {
 }
 
 int main() {
+    // Overclock to 300 MHz. Raise the core voltage first (the 1.10 V default is
+    // not enough headroom for 2x the rated clock) and let it settle before
+    // switching the system PLL. Done before stdio/peripheral init so clk_peri,
+    // I2S, and PIO dividers are all derived from the final clock.
+    vreg_set_voltage(VREG_VOLTAGE_1_15);
+    sleep_ms(2);  // allow the regulator to settle at the new voltage
+    set_sys_clock_khz(TARGET_SYS_CLOCK_KHZ, true);
+
     // Initialize USB stdio
     stdio_init_all();
     
@@ -193,7 +206,7 @@ int main() {
         *scanner,
         [](uint8_t byte) { synthApp->processMidiByte(byte); },
         std::move(telemetrySink),
-        48,  // Base note C3 (one octave lower than C4)
+        36,  // Base note (C4=60, C3=48, C2=36)
         100  // Velocity
     );
     
