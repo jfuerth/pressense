@@ -43,6 +43,15 @@ static constexpr uint8_t I2S_FIRST_PIN = 32;
 // Key scanner configuration
 static constexpr uint8_t FIRST_KEY_PIN = 0;
 static constexpr uint8_t NUM_KEYS = 32;
+
+// Mains hum rejection: oversample each key and average over an integer number
+// of AC line cycles. A boxcar integral over one full mains period has a null at
+// the line frequency and all its harmonics, cancelling the hum that was beating
+// against the previous ~64 Hz scan rate.
+static constexpr int MAINS_FREQUENCY_HZ = 60;
+static constexpr int MAINS_CYCLES_PER_SCAN = 1;  // integration window, in line cycles
+static constexpr int64_t MAINS_AVERAGE_WINDOW_US =
+    (1000000LL * MAINS_CYCLES_PER_SCAN) / MAINS_FREQUENCY_HZ;
 static constexpr uint8_t NUM_VOICES = 8;
 
 static constexpr float MASTER_VOLUME = 0.05f;  // Master volume scaling factor (0.0 to 1.0)
@@ -223,7 +232,7 @@ int main() {
     });
     
     // Enable telemetry output
-    keyboard->setTelemetryEnabled(false);
+    keyboard->setTelemetryEnabled(true);
     printf("Keyboard controller initialized\n");
     printf("Calibrating... (this takes a few seconds)\n\n");
 
@@ -259,17 +268,32 @@ int main() {
             synthApp->processCommandChar(static_cast<char>(ch));
         }
         
-        // Trigger a scan
-        scanner->startScan();
-        
-        // Wait for scan to complete
-        scanner->waitForScanComplete();
-        
-        // Process scan results and generate MIDI events -> synth
-        keyboard->processScan();
-        
-        // Scan at ~100 Hz
-        sleep_ms(10);
+        // Mains-synchronous averaging: oversample the keys for one full AC
+        // line cycle and average, so 60 Hz hum (and its harmonics) integrate
+        // to zero instead of beating down into the aftertouch band. The loop
+        // now runs at ~MAINS_FREQUENCY_HZ; no extra sleep is needed.
+        uint32_t readingSums[NUM_KEYS] = {0};
+        uint32_t sampleCount = 0;
+        absolute_time_t windowEnd = make_timeout_time_us(MAINS_AVERAGE_WINDOW_US);
+        do {
+            scanner->startScan();
+            scanner->waitForScanComplete();
+            const uint16_t* r = scanner->getScanReadings();
+            for (uint8_t i = 0; i < NUM_KEYS; i++) {
+                readingSums[i] += r[i];
+            }
+            sampleCount++;
+        } while (!time_reached(windowEnd));
+
+        uint16_t averagedReadings[NUM_KEYS];
+        for (uint8_t i = 0; i < NUM_KEYS; i++) {
+            averagedReadings[i] = sampleCount
+                ? static_cast<uint16_t>(readingSums[i] / sampleCount)
+                : 0;
+        }
+
+        // Process averaged readings and generate MIDI events -> synth
+        keyboard->processScan(averagedReadings);
     }
     
     return 0;
