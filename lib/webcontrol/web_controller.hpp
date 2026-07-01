@@ -7,6 +7,7 @@
 #include <log.hpp>
 #include <functional>
 #include <string>
+#include <vector>
 #include <cstdint>
 #include <cstdio>
 
@@ -19,15 +20,6 @@ namespace webcontrol {
  * since the keyboard controller is not part of WebController.
  */
 using SetBaseNoteCallback = std::function<void(uint8_t note)>;
-
-/**
- * @brief Callbacks for the keyboard aftertouch input range
- *
- * These live in the keyboard controller, which (like the base note) is not part
- * of WebController, so they are reached via callbacks supplied by main.
- */
-using SetAftertouchRatioCallback = std::function<void(float ratio)>;
-using GetAftertouchRangeCallback = std::function<void(float& minRatio, float& maxRatio)>;
 
 /**
  * @brief Type aliases for voice iteration (same pattern as ProgramStorage)
@@ -167,16 +159,21 @@ public:
     }
 
     /**
-     * @brief Set callbacks for the keyboard aftertouch input range
+     * @brief Register an external float parameter (e.g. a keyboard setting)
+     *
+     * External params live outside the synth voices - for example in the
+     * keyboard controller, which WebController doesn't own. Once registered, the
+     * parameter participates in setParam/getParams exactly like a synth param,
+     * with no per-parameter plumbing. Adding one is a single call from main.
+     *
+     * @param name    Parameter name as used by the control panel
+     * @param setter  Applies a new value
+     * @param getter  Reports the current value (for getParams readback)
      */
-    void setAftertouchMinRatioCallback(SetAftertouchRatioCallback callback) {
-        onSetAftertouchMinRatio_ = std::move(callback);
-    }
-    void setAftertouchMaxRatioCallback(SetAftertouchRatioCallback callback) {
-        onSetAftertouchMaxRatio_ = std::move(callback);
-    }
-    void setAftertouchRangeProvider(GetAftertouchRangeCallback callback) {
-        onGetAftertouchRange_ = std::move(callback);
+    void registerParam(const std::string& name,
+                       std::function<void(float)> setter,
+                       std::function<float()> getter) {
+        externalParams_.push_back({name, std::move(setter), std::move(getter)});
     }
 
 private:
@@ -303,18 +300,26 @@ private:
         else if (param == "tremoloDepth_atMod") {
             forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setTremoloDepthAtMod(value); });
         }
-        // Keyboard aftertouch input range (lives in the keyboard controller)
-        else if (param == "aftertouchMinRatio") {
-            if (onSetAftertouchMinRatio_) onSetAftertouchMinRatio_(value);
-        }
-        else if (param == "aftertouchMaxRatio") {
-            if (onSetAftertouchMaxRatio_) onSetAftertouchMaxRatio_(value);
-        }
-        else {
+        // Externally-registered params (e.g. keyboard aftertouch range)
+        else if (!applyExternalParam(param, value)) {
             logWarn("Unknown parameter: %s", param.c_str());
         }
     }
-    
+
+    /**
+     * @brief Apply a value to an externally-registered param
+     * @return true if the param was registered (and applied), false otherwise
+     */
+    bool applyExternalParam(const std::string& param, float value) {
+        for (auto& p : externalParams_) {
+            if (p.name == param) {
+                if (p.set) p.set(value);
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * @brief Send current parameters as telemetry
      */
@@ -347,15 +352,11 @@ private:
                 captured = true;
             }
         });
-        // Keyboard aftertouch range comes from the keyboard controller, not the
-        // voices. Fallbacks (used when no provider is wired) match the keyboard's
-        // compile-time defaults.
-        params.aftertouchMinRatio = 5.0f;
-        params.aftertouchMaxRatio = 10.0f;
-        if (onGetAftertouchRange_) {
-            onGetAftertouchRange_(params.aftertouchMinRatio, params.aftertouchMaxRatio);
-        }
         nlohmann::json j = params;
+        // Append externally-registered params (e.g. keyboard aftertouch range)
+        for (const auto& p : externalParams_) {
+            j[p.name] = p.get ? p.get() : 0.0f;
+        }
         printf("%s\n", j.dump().c_str());
     }
     
@@ -418,9 +419,14 @@ private:
     VoiceIterator voiceIterator_;
     features::ProgramStorage* programStorage_;
     SetBaseNoteCallback onSetBaseNote_;
-    SetAftertouchRatioCallback onSetAftertouchMinRatio_;
-    SetAftertouchRatioCallback onSetAftertouchMaxRatio_;
-    GetAftertouchRangeCallback onGetAftertouchRange_;
+
+    // Registry of params that live outside the synth voices
+    struct ExternalParam {
+        std::string name;
+        std::function<void(float)> set;
+        std::function<float()> get;
+    };
+    std::vector<ExternalParam> externalParams_;
     
     // Line accumulation buffer
     char lineBuffer_[512] = {0};

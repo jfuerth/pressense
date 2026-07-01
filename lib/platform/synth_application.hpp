@@ -98,20 +98,16 @@ public:
     }
 
     /**
-     * @brief Set callbacks for the keyboard aftertouch input range
+     * @brief Register an external control-panel param (e.g. a keyboard setting)
      *
-     * Like the base note, the aftertouch range lives in the keyboard controller,
-     * which is not owned by SynthApplication, so these forward to the web
-     * controller's callback hooks.
+     * Forwards to the web controller's param registry. Use this for params that
+     * live outside the synth voices (such as the keyboard aftertouch range),
+     * which SynthApplication doesn't own.
      */
-    void setAftertouchMinRatioCallback(webcontrol::SetAftertouchRatioCallback callback) {
-        webController_->setAftertouchMinRatioCallback(std::move(callback));
-    }
-    void setAftertouchMaxRatioCallback(webcontrol::SetAftertouchRatioCallback callback) {
-        webController_->setAftertouchMaxRatioCallback(std::move(callback));
-    }
-    void setAftertouchRangeProvider(webcontrol::GetAftertouchRangeCallback callback) {
-        webController_->setAftertouchRangeProvider(std::move(callback));
+    void registerExternalParam(const std::string& name,
+                               std::function<void(float)> setter,
+                               std::function<float()> getter) {
+        webController_->registerParam(name, std::move(setter), std::move(getter));
     }
     
     /**

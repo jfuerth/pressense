@@ -93,10 +93,6 @@ struct ParamsTelemetry {
     float filterEnvAmount_atMod;
     float vibratoDepth_atMod;
     float tremoloDepth_atMod;
-
-    // Aftertouch input mapping (keyboard pressure ratio -> 0..127)
-    float aftertouchMinRatio;
-    float aftertouchMaxRatio;
 };
 
 inline void to_json(nlohmann::json& j, const ParamsTelemetry& p) {
@@ -122,9 +118,7 @@ inline void to_json(nlohmann::json& j, const ParamsTelemetry& p) {
         {"baseCutoff_atMod", p.baseCutoff_atMod},
         {"filterEnvAmount_atMod", p.filterEnvAmount_atMod},
         {"vibratoDepth_atMod", p.vibratoDepth_atMod},
-        {"tremoloDepth_atMod", p.tremoloDepth_atMod},
-        {"aftertouchMinRatio", p.aftertouchMinRatio},
-        {"aftertouchMaxRatio", p.aftertouchMaxRatio}
+        {"tremoloDepth_atMod", p.tremoloDepth_atMod}
     };
 }
 
