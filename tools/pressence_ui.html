@@ -210,7 +210,29 @@
             font-size: 9px;
             color: #ce9178;
         }
-        
+
+        /* No value received yet (awaiting first report from the device) */
+        .knob-container.no-value .knob {
+            opacity: 0.4;
+            cursor: not-allowed;
+            border-style: dashed;
+        }
+        .knob-container.no-value .knob-indicator {
+            background: #666;
+        }
+        .knob-container.no-value .knob-value {
+            color: #666;
+        }
+        /* Device reported params but not this one - likely removed from firmware */
+        .knob-container.missing .knob {
+            opacity: 1;
+            border-color: #c0392b;
+        }
+        .knob-container.missing .knob-label,
+        .knob-container.missing .knob-value {
+            color: #e06c5a;
+        }
+
         /* Telemetry Panel Styles */
         .telemetry-row {
             display: flex;

@@ -20,9 +20,10 @@ using VoiceIterator = std::function<void(VoiceVisitor)>;
  * Storage implementations (elsewhere) handle actual file/memory operations.
  * 
  * When adding new parameters:
- * 1. Add member variable with default value
- * 2. Add to to_json() function
- * 3. Add to from_json() function with .value() for backward compatibility
+ * 1. Add a member variable with its default value (the single source of truth
+ *    for that parameter's default)
+ * 2. Add the member name to the NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT
+ *    list below - JSON (de)serialization and default-if-missing are automatic
  */
 struct ProgramData {
     // Oscillator
@@ -147,66 +148,20 @@ inline void applyProgramToVoices(const ProgramData& program, VoiceIterator forEa
     });
 }
 
-// JSON serialization functions (must be in same namespace as ProgramData)
-inline void to_json(nlohmann::json& j, const ProgramData& p) {
-    j = nlohmann::json{
-        {"waveformShape", p.waveformShape},
-        {"baseCutoff", p.baseCutoff},
-        {"filterQ", p.filterQ},
-        {"filterMode", p.filterMode},
-        {"filterEnvAmount", p.filterEnvAmount},
-        {"filterEnvAttack", p.filterEnvAttack},
-        {"filterEnvDecay", p.filterEnvDecay},
-        {"filterEnvSustain", p.filterEnvSustain},
-        {"filterEnvRelease", p.filterEnvRelease},
-        // Amplitude envelope
-        {"ampEnvAttack", p.ampEnvAttack},
-        {"ampEnvDecay", p.ampEnvDecay},
-        {"ampEnvSustain", p.ampEnvSustain},
-        {"ampEnvRelease", p.ampEnvRelease},
-        // Vibrato
-        {"vibratoRate", p.vibratoRate},
-        {"vibratoDepth", p.vibratoDepth},
-        // Tremolo
-        {"tremoloRate", p.tremoloRate},
-        {"tremoloDepth", p.tremoloDepth},
-        // Aftertouch modulation
-        {"baseCutoff_atMod", p.baseCutoff_atMod},
-        {"filterEnvAmount_atMod", p.filterEnvAmount_atMod},
-        {"vibratoDepth_atMod", p.vibratoDepth_atMod},
-        {"tremoloDepth_atMod", p.tremoloDepth_atMod}
-    };
-}
-
-inline void from_json(const nlohmann::json& j, ProgramData& p) {
-    // Use value() with defaults for backward compatibility
-    // If a field is missing in the JSON, the default value is used
-    p.waveformShape = j.value("waveformShape", 0.0f);
-    p.baseCutoff = j.value("baseCutoff", 1000.0f);
-    p.filterQ = j.value("filterQ", 0.707f);
-    p.filterMode = j.value("filterMode", 0);
-    p.filterEnvAmount = j.value("filterEnvAmount", 0.5f);
-    p.filterEnvAttack = j.value("filterEnvAttack", 0.005f);
-    p.filterEnvDecay = j.value("filterEnvDecay", 0.2f);
-    p.filterEnvSustain = j.value("filterEnvSustain", 0.3f);
-    p.filterEnvRelease = j.value("filterEnvRelease", 0.1f);
-    // Amplitude envelope
-    p.ampEnvAttack = j.value("ampEnvAttack", 0.01f);
-    p.ampEnvDecay = j.value("ampEnvDecay", 0.05f);
-    p.ampEnvSustain = j.value("ampEnvSustain", 0.7f);
-    p.ampEnvRelease = j.value("ampEnvRelease", 0.1f);
-    // Vibrato
-    p.vibratoRate = j.value("vibratoRate", 5.0f);
-    p.vibratoDepth = j.value("vibratoDepth", 0.0f);
-    // Tremolo
-    p.tremoloRate = j.value("tremoloRate", 5.0f);
-    p.tremoloDepth = j.value("tremoloDepth", 0.0f);
-    // Aftertouch modulation
-    p.baseCutoff_atMod = j.value("baseCutoff_atMod", 0.0f);
-    p.filterEnvAmount_atMod = j.value("filterEnvAmount_atMod", 0.0f);
-    p.vibratoDepth_atMod = j.value("vibratoDepth_atMod", 0.0f);
-    p.tremoloDepth_atMod = j.value("tremoloDepth_atMod", 0.0f);
-}
+// JSON serialization (must be in the same namespace as ProgramData).
+//
+// to_json/from_json are generated from the field list below. On read, any field
+// missing from the JSON falls back to a default-constructed ProgramData's value,
+// so the struct's member initializers above are the single source of truth for
+// defaults and older patches stay forward-compatible as new params are added.
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ProgramData,
+    waveformShape,
+    baseCutoff, filterQ, filterMode,
+    filterEnvAmount, filterEnvAttack, filterEnvDecay, filterEnvSustain, filterEnvRelease,
+    ampEnvAttack, ampEnvDecay, ampEnvSustain, ampEnvRelease,
+    vibratoRate, vibratoDepth,
+    tremoloRate, tremoloDepth,
+    baseCutoff_atMod, filterEnvAmount_atMod, vibratoDepth_atMod, tremoloDepth_atMod)
 
 } // namespace midi
 

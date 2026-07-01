@@ -8,36 +8,36 @@ window.controlPanel = (function() {
     // Parameter definitions with ranges and display settings
     const PARAMS = {
         // Aftertouch (keyboard touch response): pressure ratio that maps to 0..127
-        aftertouchMinRatio: { min: 1, max: 9, default: 5, label: 'AT Min', unit: '', hasAtMod: false },
-        aftertouchMaxRatio: { min: 2, max: 15, default: 10, label: 'AT Max', unit: '', hasAtMod: false },
+        aftertouchMinRatio: { min: 1, max: 9, label: 'AT Min', unit: '', hasAtMod: false },
+        aftertouchMaxRatio: { min: 2, max: 15, label: 'AT Max', unit: '', hasAtMod: false },
 
         // Oscillator
-        waveformShape: { min: 0, max: 1, default: 0, label: 'Waveform', unit: '', hasAtMod: false },
+        waveformShape: { min: 0, max: 1, label: 'Waveform', unit: '', hasAtMod: false },
         
         // Filter
-        baseCutoff: { min: 20, max: 20000, default: 1000, label: 'Cutoff', unit: 'Hz', log: true, hasAtMod: true },
-        filterQ: { min: 0.1, max: 20, default: 0.707, label: 'Resonance', unit: '', hasAtMod: false },
+        baseCutoff: { min: 20, max: 20000, label: 'Cutoff', unit: 'Hz', log: true, hasAtMod: true },
+        filterQ: { min: 0.1, max: 20, label: 'Resonance', unit: '', hasAtMod: false },
         
         // Filter Envelope
-        filterEnvAmount: { min: 0, max: 1, default: 0.5, label: 'Env Amount', unit: '', hasAtMod: true },
-        filterEnvAttack: { min: 0.001, max: 2, default: 0.005, label: 'Attack', unit: 's', log: true, hasAtMod: false },
-        filterEnvDecay: { min: 0.01, max: 5, default: 0.2, label: 'Decay', unit: 's', log: true, hasAtMod: false },
-        filterEnvSustain: { min: 0, max: 1, default: 0.3, label: 'Sustain', unit: '', hasAtMod: false },
-        filterEnvRelease: { min: 0.01, max: 5, default: 0.1, label: 'Release', unit: 's', log: true, hasAtMod: false },
+        filterEnvAmount: { min: 0, max: 1, label: 'Env Amount', unit: '', hasAtMod: true },
+        filterEnvAttack: { min: 0.001, max: 2, label: 'Attack', unit: 's', log: true, hasAtMod: false },
+        filterEnvDecay: { min: 0.01, max: 5, label: 'Decay', unit: 's', log: true, hasAtMod: false },
+        filterEnvSustain: { min: 0, max: 1, label: 'Sustain', unit: '', hasAtMod: false },
+        filterEnvRelease: { min: 0.01, max: 5, label: 'Release', unit: 's', log: true, hasAtMod: false },
         
         // Amp Envelope
-        ampEnvAttack: { min: 0.001, max: 2, default: 0.01, label: 'Attack', unit: 's', log: true, hasAtMod: false },
-        ampEnvDecay: { min: 0.01, max: 5, default: 0.05, label: 'Decay', unit: 's', log: true, hasAtMod: false },
-        ampEnvSustain: { min: 0, max: 1, default: 0.7, label: 'Sustain', unit: '', hasAtMod: false },
-        ampEnvRelease: { min: 0.01, max: 5, default: 0.1, label: 'Release', unit: 's', log: true, hasAtMod: false },
+        ampEnvAttack: { min: 0.001, max: 2, label: 'Attack', unit: 's', log: true, hasAtMod: false },
+        ampEnvDecay: { min: 0.01, max: 5, label: 'Decay', unit: 's', log: true, hasAtMod: false },
+        ampEnvSustain: { min: 0, max: 1, label: 'Sustain', unit: '', hasAtMod: false },
+        ampEnvRelease: { min: 0.01, max: 5, label: 'Release', unit: 's', log: true, hasAtMod: false },
         
         // Vibrato
-        vibratoRate: { min: 0.1, max: 20, default: 5, label: 'Rate', unit: 'Hz', hasAtMod: false },
-        vibratoDepth: { min: 0, max: 1, default: 0, label: 'Depth', unit: 'st', hasAtMod: true },
+        vibratoRate: { min: 0.1, max: 20, label: 'Rate', unit: 'Hz', hasAtMod: false },
+        vibratoDepth: { min: 0, max: 1, label: 'Depth', unit: 'st', hasAtMod: true },
         
         // Tremolo
-        tremoloRate: { min: 0.1, max: 20, default: 5, label: 'Rate', unit: 'Hz', hasAtMod: false },
-        tremoloDepth: { min: 0, max: 1, default: 0, label: 'Depth', unit: '', hasAtMod: true }
+        tremoloRate: { min: 0.1, max: 20, label: 'Rate', unit: 'Hz', hasAtMod: false },
+        tremoloDepth: { min: 0, max: 1, label: 'Depth', unit: '', hasAtMod: true }
     };
     
     // Aftertouch mod params
@@ -80,27 +80,25 @@ window.controlPanel = (function() {
         
         const valueDisplay = document.createElement('div');
         valueDisplay.className = 'knob-value';
-        valueDisplay.textContent = formatValue(paramName, config.default, isAtMod);
-        
+
         knobWrapper.appendChild(knob);
         container.appendChild(label);
         container.appendChild(knobWrapper);
         container.appendChild(valueDisplay);
-        
-        // Initialize knob position
-        const initialValue = isAtMod ? 0 : config.default;
-        setKnobRotation(knob, valueToRotation(paramName, initialValue, isAtMod));
-        currentParams[paramName] = initialValue;
-        
+
+        // No value yet. The device is the source of truth for values, so the
+        // knob stays in a "pending" state until updateFromDevice() reports one.
+        // If the device never reports it (param removed from firmware), it is
+        // flagged "missing" instead.
+        markKnobUnknown(container, 'pending');
+
         // Add drag interaction
         setupKnobDrag(knob, paramName, config, isAtMod, valueDisplay);
-        
+
         // Double-click to reset AT mod knobs to 0
         if (isAtMod) {
             knob.addEventListener('dblclick', () => {
-                currentParams[paramName] = 0;
-                setKnobRotation(knob, 0);
-                valueDisplay.textContent = '0';
+                markKnobValue(container, paramName, 0, true);
                 scheduleParamSend(paramName, 0);
             });
         }
@@ -124,7 +122,7 @@ window.controlPanel = (function() {
         // AT mod knob (if applicable)
         if (config.hasAtMod) {
             const atModParam = paramName + '_atMod';
-            const atModConfig = { min: -1, max: 1, default: 0, label: 'AT Mod', unit: '' };
+            const atModConfig = { min: -1, max: 1, label: 'AT Mod', unit: '' };
             wrapper.appendChild(createKnob(atModParam, atModConfig, true));
         }
         
@@ -140,9 +138,12 @@ window.controlPanel = (function() {
         let startValue = 0;
         
         const handleStart = (e) => {
+            // Can't drag a control with no known value (pending, or removed from
+            // firmware). It becomes draggable once the device reports a value.
+            if (!(paramName in currentParams)) return;
             isDragging = true;
             startY = e.clientY || e.touches[0].clientY;
-            startValue = currentParams[paramName] || (isAtMod ? 0 : config.default);
+            startValue = currentParams[paramName];
             knob.classList.add('active');
             e.preventDefault();
         };
@@ -270,31 +271,58 @@ window.controlPanel = (function() {
     }
     
     /**
+     * Apply a known value to a knob, clearing any pending/missing state.
+     */
+    function markKnobValue(container, paramName, value, isAtMod) {
+        container.classList.remove('no-value', 'missing');
+        currentParams[paramName] = value;
+        const knob = container.querySelector('.knob');
+        const valueDisplay = container.querySelector('.knob-value');
+        if (knob) setKnobRotation(knob, valueToRotation(paramName, value, isAtMod));
+        if (valueDisplay) valueDisplay.textContent = formatValue(paramName, value, isAtMod);
+    }
+
+    /**
+     * Put a knob into a no-value state.
+     * @param {HTMLElement} container Knob container
+     * @param {string} state 'pending' (awaiting first report) or 'missing'
+     *   (device reported params but not this one - likely removed from firmware)
+     */
+    function markKnobUnknown(container, state) {
+        container.classList.add('no-value');
+        container.classList.toggle('missing', state === 'missing');
+        const knob = container.querySelector('.knob');
+        const valueDisplay = container.querySelector('.knob-value');
+        if (knob) setKnobRotation(knob, -135); // neutral resting position
+        if (valueDisplay) valueDisplay.textContent = (state === 'missing') ? 'n/a' : '—';
+        // No value -> not draggable (handleStart checks currentParams membership)
+        delete currentParams[container.dataset.param];
+    }
+
+    /**
      * Update UI from received parameters
      * @param {Object} params Parameter object from device
      */
     function updateFromDevice(params) {
-        for (const [key, value] of Object.entries(params)) {
-            if (key === 'type') continue; // Skip message type field
-            
-            currentParams[key] = value;
-            
-            // Find and update knob
-            const knob = document.querySelector(`.knob[data-param="${key}"]`);
-            if (knob) {
-                const isAtMod = key.endsWith('_atMod');
-                setKnobRotation(knob, valueToRotation(key, value, isAtMod));
-                
-                // Update value display
-                const container = knob.closest('.knob-container');
-                if (container) {
-                    const valueDisplay = container.querySelector('.knob-value');
-                    if (valueDisplay) {
-                        valueDisplay.textContent = formatValue(key, value, isAtMod);
-                    }
-                }
-            }
+        // Names the device actually reported (the message is the full param set)
+        const received = new Set(
+            Object.keys(params).filter(k => k !== 'type')
+        );
+
+        for (const key of received) {
+            const container = document.querySelector(`.knob-container[data-param="${key}"]`);
+            if (!container) continue; // device sent a param we have no knob for
+            markKnobValue(container, key, params[key], key.endsWith('_atMod'));
         }
+
+        // Any control the device did NOT report is missing from the firmware.
+        // Flag it so a removed/renamed param is visible rather than silently stale.
+        document.querySelectorAll('.knob-container').forEach(container => {
+            const name = container.dataset.param;
+            if (name && !received.has(name)) {
+                markKnobUnknown(container, 'missing');
+            }
+        });
     }
     
     /**
