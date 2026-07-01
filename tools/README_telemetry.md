@@ -10,8 +10,9 @@ USB serial using the Web Serial API and is built from three modules in `tools/js
 
 ## Features
 
-- **Synth parameter control**: Knobs for oscillator, filter, envelopes, vibrato/tremolo,
-  and aftertouch modulation, sent to the device as JSON commands (see `lib/webcontrol`)
+- **Synth & keyboard parameter control**: Knobs for oscillator, filter, envelopes,
+  vibrato/tremolo, aftertouch modulation, and the keyboard's aftertouch input range,
+  sent to the device as JSON commands (see `lib/webcontrol`)
 - **Program save/load**: Store and recall synth settings in the device's program slots
 - **Base note control**: Transpose the keyboard from the browser
 - **Real-time key scan visualization**: Vertical bars showing sensor readings for each key
@@ -67,12 +68,18 @@ Open `tools/pressence_ui.html` in a Chromium-based browser (Chrome, Edge, or Ope
   - **RP2350** (`rp2350::Rp2350TelemetrySink`): synchronous JSON serialization and
     `printf()` to USB serial.
 
-- Key scan telemetry is off by default; each platform's `main` toggles it with
-  `keyboard->setTelemetryEnabled(...)`.
+- Key scan telemetry is enabled/disabled at runtime by each platform's `main`
+  calling `keyboard->setTelemetryEnabled(...)`. Look for that call in
+  `src/main_<platform>.cpp` to see or change the current default.
 
 - **WebController** (`lib/webcontrol`) parses incoming JSON command lines from the
   control panel (`setParam`, `getParams`, `saveProgram`, `loadProgram`, `setBaseNote`)
   and applies them to the synth voices, program storage, and keyboard.
+
+- Parameters that live outside the synth voices (e.g. the keyboard aftertouch input
+  range) are registered from `main` via `WebController::registerParam(name, setter,
+  getter)`; once registered they ride the same `setParam`/`getParams` path as voice
+  params, so adding one needs no changes to `WebController` itself.
 
 - Audio timing telemetry (`lib/features/performance_timer.hpp`) is compile-time gated;
   on RP2350 it is controlled by `ENABLE_AUDIO_TIMING_TELEMETRY` in `main_rp2350.cpp`.

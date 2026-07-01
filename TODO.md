@@ -7,5 +7,5 @@
   - would need to remember the synth's state - ADSR, delays, filters; not just retrigger
 
 # Program save/load
-- Try being less verbose with the JSON mapping.
-  - Could we make the JSON really mirror the structure of the voice, nesting filter settings in the JSON (recursive serialization)? Does the nlohmann library support this? Could the synth objects themselves be JSON serializable? Ideally programs could represent synths with different structures of filters, envelopes, etc, and build them from the JSON...
+- Could we make the JSON mirror the structure of the voice, nesting filter settings in the JSON (recursive serialization)? Does the nlohmann library support this? Could the synth objects themselves be JSON serializable? Ideally programs could represent synths with different structures of filters, envelopes, etc, and build them from the JSON.
+  - (The flat field mapping is now generated via NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT in program_data.hpp, so the earlier "less verbose mapping" goal is handled.)

@@ -39,6 +39,10 @@ lib/
 │   ├── i2s_audio_sink.hpp
 │   ├── capacitive_scanner.hpp
 │   └── embedded_program_storage.hpp    # Implements features::ProgramStorage
+├── rp2350/            # All RP2350 (Raspberry Pi Pico 2) implementations
+│   ├── pio_capacitive_scanner.hpp
+│   ├── rp2350_audio_sink.hpp
+│   └── embedded_program_storage.hpp    # Implements features::ProgramStorage
 └── platform/          # Platform-agnostic code
     └── synth_application.hpp
 ```
@@ -89,8 +93,8 @@ Every platform provides a program storage implementation or `nullptr`:
 class ProgramStorage {
 public:
     virtual ~ProgramStorage() = default;
-    virtual bool loadProgram(uint8_t program, midi::SynthVoiceAllocator& allocator) = 0;
-    virtual bool saveProgram(uint8_t program, midi::SynthVoiceAllocator& allocator) = 0;
+    virtual bool loadProgram(uint8_t program, VoiceIterator forEachVoice) = 0;
+    virtual bool saveProgram(uint8_t program, VoiceIterator forEachVoice) = 0;
 };
 ```
 
@@ -121,7 +125,7 @@ SynthApplication synth(sampleRate, channels, voices, std::move(storage));
 **Application code checks for null:**
 ```cpp
 if (programStorage_) {
-    programStorage_->loadProgram(program, allocator);
+    programStorage_->loadProgram(program, forEachVoice);
 } else {
     logWarn("No program storage available");
 }
@@ -243,7 +247,7 @@ Use `#pragma once` for all header files:
 
 - **Classes, Structs, Enums**: PascalCase
   ```cpp
-  class SynthVoiceAllocator { };
+  class WavetableSynth { };
   struct TimingStats { };
   enum class FilterMode { };
   ```

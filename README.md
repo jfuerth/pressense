@@ -19,12 +19,12 @@ High-level architecture, from input side to output side:
   * Currently one implementation: subtractive synthesizer with morphable Sawtooth/Triangle/Square waveforms
   * Reusable biquad filter, composable with envelope generator
   * Reusable ADSR envelope generator
-  * Reusable LFO (vibrato and tremolo) and aftertouch modulation of filter cutoff, filter envelope amount, and vibrato depth
+  * Reusable LFO (vibrato and tremolo) and aftertouch modulation of filter cutoff, filter envelope amount, vibrato depth, and tremolo depth
   * Voice mixing with various clipping/distortion algorithms
   * There's room to implement other types of synth engines without worrying about note-to-voice allocation, mixdown, etc.
   * Future idea: could implement a tracker module that ignores the voice allocator and drives voices directly (one voice per track)
 * Audio output
-  * The ESP32 implementation drives an external DAC via I2S
+  * The RP2350 and ESP32 implementations drive an external DAC via I2S
   * The Linux implementation outputs to ALSA (useful for embedded Linux projects)
   * Future: probably should include an option for Pipewire or JACK
 
@@ -99,6 +99,22 @@ To use a virtual keyboard:
     * MIDI Out Driver: ALSA
     * Output MIDI Connection: Virtual Raw MIDI 2-0
 * `.pio/build/native/program hw:2,0,0`
+
+### RP2350 (Waveshare RP2350B)
+
+The RP2350 build is a self-contained instrument: it scans the capacitive keys,
+runs the polyphonic synth, and outputs audio over I2S. It also exposes the
+browser control panel and telemetry over USB serial (see
+[tools/README_telemetry.md](tools/README_telemetry.md)).
+
+```bash
+source ~/.platformio/penv/bin/activate
+pio run -e waveshare_2350b             # build
+pio run -e waveshare_2350b -t upload   # build + flash
+```
+
+Flashing uses the standard RP2350 flow: put the board in BOOTSEL mode (or attach
+a debug probe) before uploading.
 
 ### ESP32 DEVKITV1
 
