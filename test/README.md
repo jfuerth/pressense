@@ -7,13 +7,20 @@ This project uses the C++17 standard, as (I think) is required by the Arduino+ES
 
 ## Organization
 
-Test cases are broken down into three directories:
+Test suites live in `test_*` directories (PlatformIO requires every directory
+containing a suite to be named `test_*`). Current suites, both of which run on
+the embedded hardware and on the Linux/MacOS/CI environment (PlatformIO "Native"
+platform):
 
-* test_common/ -- tests that run on the embedded hardware and on the Linux/MacOS/CI environment (PlatformIO "Native" platform)
-* test_desktop/ -- tests that only run on the dev environment
-* test_embedded/ -- tests that only run on the esp32 hardware
+* test_common/ -- MIDI stream processing and note routing
+* test_voice_allocation/ -- real-time memory safety of the voice pool (see below)
 
-When adding new categories in the future, note that PlatformIO requires all directories containing test suites to be named `test_*`. 
+The naming convention also reserves two platform-scoped categories for when
+they're needed, each excluded from the other environment via `test_ignore` in
+`platformio.ini`:
+
+* test_desktop/ -- tests that only run on the dev/native environment
+* test_embedded/ -- tests that only run on real hardware
 
 ## Running the tests
 
@@ -43,26 +50,25 @@ and it's faster than running one group of tests at a time.
 
 ## Testing Real-Time Memory Safety
 
-For real-time audio applications, it's critical to ensure no heap allocations occur during audio processing. This project includes a custom memory tracking utility to verify this.
+For real-time audio applications, it's critical to ensure no heap allocations occur during audio processing. This project includes a custom memory tracking utility to verify this: `test/test_voice_allocation/memory_tracker.hpp`, exercised by `test_voice_allocation.cpp`.
 
 ### Memory Tracking Usage
 
-The `memory_tracker.hpp` utility allows you to verify that code blocks don't perform heap allocations:
+Define `ENABLE_MEMORY_TRACKING` before including `memory_tracker.hpp` (in exactly one translation unit of the test program, since it replaces the global `new`/`delete` operators). Then wrap the real-time-critical code in `TEST_NO_HEAP_ALLOCATIONS`:
 
 ```cpp
 #define ENABLE_MEMORY_TRACKING
 #include "memory_tracker.hpp"
 
 void test_realtime_code() {
-    // Setup code (can allocate)
-    auto allocator = createAllocator();
-    
-    // Test real-time critical section
+    // Setup (allocation is fine here): the voice pool is pre-allocated.
+    Target target(4, makeVoiceFactory());
+
+    // Real-time critical section: the MIDI/voice path must not touch the heap.
     TEST_NO_HEAP_ALLOCATIONS({
         // This code must not call new/delete/malloc/free
-        auto& voice = allocator.voiceFor(60);
-        voice.trigger(440.0f, 0.8f);
-        voice.release();
+        target.noteOn(60, 100);
+        target.noteOff(60, 0);
     });
 }
 ```
