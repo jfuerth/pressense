@@ -61,6 +61,7 @@ struct ProgramData {
     float filterEnvAmount_atMod = 0.0f;
     float vibratoDepth_atMod = 0.0f;
     float tremoloDepth_atMod = 0.0f;
+    float pitchBend_atMod = 0.0f;  // Semitones [-12, +12] bent at full aftertouch
     
     /**
      * @brief Capture current synth settings from voices
@@ -96,6 +97,7 @@ struct ProgramData {
                 filterEnvAmount_atMod = ws.getFilterEnvAmountAtMod();
                 vibratoDepth_atMod = ws.getVibratoDepthAtMod();
                 tremoloDepth_atMod = ws.getTremoloDepthAtMod();
+                pitchBend_atMod = ws.getPitchBendAtMod();
                 captured = true;
             }
         });
@@ -145,6 +147,7 @@ inline void applyProgramToVoices(const ProgramData& program, VoiceIterator forEa
         ws.setFilterEnvAmountAtMod(program.filterEnvAmount_atMod);
         ws.setVibratoDepthAtMod(program.vibratoDepth_atMod);
         ws.setTremoloDepthAtMod(program.tremoloDepth_atMod);
+        ws.setPitchBendAtMod(program.pitchBend_atMod);
     });
 }
 
@@ -161,7 +164,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ProgramData,
     ampEnvAttack, ampEnvDecay, ampEnvSustain, ampEnvRelease,
     vibratoRate, vibratoDepth,
     tremoloRate, tremoloDepth,
-    baseCutoff_atMod, filterEnvAmount_atMod, vibratoDepth_atMod, tremoloDepth_atMod)
+    baseCutoff_atMod, filterEnvAmount_atMod, vibratoDepth_atMod, tremoloDepth_atMod,
+    pitchBend_atMod)
 
 } // namespace midi
 

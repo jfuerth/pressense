@@ -219,6 +219,16 @@ public:
     
     void setTremoloDepthAtMod(float amount) { tremoloDepth_atMod_ = amount; }
     float getTremoloDepthAtMod() const { return tremoloDepth_atMod_; }
+
+    // Pitch bend aftertouch modulation is expressed directly in semitones
+    // (unlike the [-1, 1] scalers above): full aftertouch bends the pitch by
+    // this many semitones. Clamped to [-12, +12]. Negative bends downward.
+    void setPitchBendAtMod(float semitones) {
+        if (semitones < -12.0f) semitones = -12.0f;
+        if (semitones > 12.0f) semitones = 12.0f;
+        pitchBend_atMod_ = semitones;
+    }
+    float getPitchBendAtMod() const { return pitchBend_atMod_; }
     
     /**
      * @brief Generate the next audio sample
@@ -257,10 +267,28 @@ public:
         vibratoLfo_.setDepth(effectiveVibratoDepth);
         float vibratoMod = vibratoLfo_.nextSample();  // Returns semitone offset
         
-        // Calculate current frequency with pitch bend and vibrato
+        // Calculate current frequency with pitch bend and vibrato.
+        // Aftertouch adds a further linear bend (semitones) on top of the MIDI
+        // pitch wheel and vibrato; all three sources sum in the semitone domain.
         timer.nextSpan("synth:pitch_bend");
-        float semitoneShift = pitchBend_ * pitchBendRange_ + vibratoMod;
-        float frequency = baseFrequency_ * std::pow(2.0f, semitoneShift / 12.0f);
+        float aftertouchBend = aftertouch_ * pitchBend_atMod_;
+        float semitoneShift = pitchBend_ * pitchBendRange_ + vibratoMod + aftertouchBend;
+
+        // The exponential semitone->frequency mapping (std::pow) is the most
+        // expensive op in this loop. Pitch bend and aftertouch move at control
+        // rate and vibrato moves slowly, so recompute only when the combined
+        // shift (or the base note) actually changes. 0.01 semitone (~1 cent) is
+        // well below the ~5-cent pitch JND, so this is inaudible. This mirrors
+        // the change-threshold guard in BiquadFilter::setCutoff and keeps a
+        // held, unmodulated note from paying for std::pow every sample.
+        float shiftDelta = semitoneShift - lastSemitoneShift_;
+        if (shiftDelta < 0.0f) shiftDelta = -shiftDelta;
+        if (baseFrequency_ != cachedBaseFrequency_ || shiftDelta > 0.01f) {
+            cachedBaseFrequency_ = baseFrequency_;
+            lastSemitoneShift_ = semitoneShift;
+            cachedFrequency_ = baseFrequency_ * std::pow(2.0f, semitoneShift * (1.0f / 12.0f));
+        }
+        float frequency = cachedFrequency_;
         
         // Generate oscillator sample
         timer.nextSpan("synth:oscillator");
@@ -325,6 +353,14 @@ private:
     float filterEnvAmount_atMod_ = 0.0f;
     float vibratoDepth_atMod_ = 0.0f;
     float tremoloDepth_atMod_ = 0.0f;
+    float pitchBend_atMod_ = 0.0f;  // Semitones [-12, +12] (not a [-1,1] scaler)
+
+    // Cache for the semitone->frequency mapping, so a held/slowly-modulated note
+    // avoids calling std::pow every sample. cachedBaseFrequency_ starts at a
+    // sentinel that can never match baseFrequency_, forcing the first compute.
+    float lastSemitoneShift_ = 0.0f;
+    float cachedFrequency_ = 0.0f;
+    float cachedBaseFrequency_ = -1.0f;
 };
 
 } // namespace synth

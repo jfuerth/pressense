@@ -37,11 +37,27 @@ window.controlPanel = (function() {
         
         // Tremolo
         tremoloRate: { min: 0.1, max: 20, label: 'Rate', unit: 'Hz', hasAtMod: false },
-        tremoloDepth: { min: 0, max: 1, label: 'Depth', unit: '', hasAtMod: true }
+        tremoloDepth: { min: 0, max: 1, label: 'Depth', unit: '', hasAtMod: true },
+
+        // Pitch bend: aftertouch-only. No primary knob (pitch bend itself comes
+        // from the MIDI wheel); the AT-Mod knob sets how many semitones full
+        // pressure bends the pitch. Range/unit differ from the default [-1,1].
+        pitchBend: { label: 'Pitch Bend', hasAtMod: true, atModOnly: true,
+                     atModMin: -12, atModMax: 12, atModUnit: 'st', atModStep: 1 }
     };
-    
-    // Aftertouch mod params
-    const AT_MOD_PARAMS = ['baseCutoff_atMod', 'filterEnvAmount_atMod', 'vibratoDepth_atMod', 'tremoloDepth_atMod'];
+
+    // Aftertouch mod range defaults to [-1, 1] (a dimensionless depth). A base
+    // param may override via atModMin/atModMax (and label the unit via atModUnit).
+    function atModRange(baseConfig) {
+        const c = baseConfig || {};
+        return {
+            min: (c.atModMin !== undefined) ? c.atModMin : -1,
+            max: (c.atModMax !== undefined) ? c.atModMax : 1
+        };
+    }
+
+    // Aftertouch mod params (informational; the real wiring is PARAMS[*].hasAtMod)
+    const AT_MOD_PARAMS = ['baseCutoff_atMod', 'filterEnvAmount_atMod', 'vibratoDepth_atMod', 'tremoloDepth_atMod', 'pitchBend_atMod'];
     
     // Current parameter values
     let currentParams = {};
@@ -64,7 +80,9 @@ window.controlPanel = (function() {
         
         const label = document.createElement('div');
         label.className = 'knob-label';
-        label.textContent = isAtMod ? 'AT Mod' : config.label;
+        // A standalone (atModOnly) AT knob shows its own name; a paired one is
+        // just labelled "AT Mod" beneath its primary knob.
+        label.textContent = isAtMod ? (config.atModOnly ? config.label : 'AT Mod') : config.label;
         
         const knobWrapper = document.createElement('div');
         knobWrapper.className = 'knob-wrapper';
@@ -115,17 +133,19 @@ window.controlPanel = (function() {
     function createDualKnob(paramName, config) {
         const wrapper = document.createElement('div');
         wrapper.className = 'dual-knob-wrapper';
-        
-        // Primary knob
-        wrapper.appendChild(createKnob(paramName, config, false));
-        
-        // AT mod knob (if applicable)
+
+        // Primary knob (skipped for atMod-only params like pitch bend)
+        if (!config.atModOnly) {
+            wrapper.appendChild(createKnob(paramName, config, false));
+        }
+
+        // AT mod knob (if applicable). Pass the base config so the knob can read
+        // its atMod range/unit; createKnob picks the right label.
         if (config.hasAtMod) {
             const atModParam = paramName + '_atMod';
-            const atModConfig = { min: -1, max: 1, label: 'AT Mod', unit: '' };
-            wrapper.appendChild(createKnob(atModParam, atModConfig, true));
+            wrapper.appendChild(createKnob(atModParam, config, true));
         }
-        
+
         return wrapper;
     }
     
@@ -155,7 +175,8 @@ window.controlPanel = (function() {
             const deltaY = startY - currentY; // Inverted: up increases value
             
             // Calculate sensitivity based on range
-            const range = isAtMod ? 2 : (config.max - config.min);
+            const atRange = isAtMod ? atModRange(config) : null;
+            const range = isAtMod ? (atRange.max - atRange.min) : (config.max - config.min);
             const sensitivity = range / 200; // 200 pixels for full range
             
             let newValue;
@@ -171,9 +192,17 @@ window.controlPanel = (function() {
             }
             
             // Clamp to range
-            const min = isAtMod ? -1 : config.min;
-            const max = isAtMod ? 1 : config.max;
+            const min = isAtMod ? atRange.min : config.min;
+            const max = isAtMod ? atRange.max : config.max;
             newValue = Math.max(min, Math.min(max, newValue));
+
+            // Snap to discrete detents if requested. Pitch bend uses whole
+            // semitones so every target note is reachable; without this the knob
+            // is continuous and lands on values like 5.87 instead of 6.
+            const step = isAtMod ? config.atModStep : undefined;
+            if (step) {
+                newValue = Math.round(newValue / step) * step;
+            }
             
             // Update display and send
             currentParams[paramName] = newValue;
@@ -203,10 +232,13 @@ window.controlPanel = (function() {
      */
     function valueToRotation(paramName, value, isAtMod) {
         const config = PARAMS[paramName.replace('_atMod', '')];
-        
+
         if (isAtMod) {
-            // AT mod: -1 to 1 maps to -135 to 135 degrees
-            return value * 135;
+            // AT mod sweeps its range across -135..135 degrees (0 centered when
+            // the range is symmetric, e.g. [-1,1] or [-12,12]).
+            const r = atModRange(config);
+            const normalized = (value - r.min) / (r.max - r.min);
+            return (normalized * 270) - 135;
         }
         
         let normalized;
@@ -236,8 +268,12 @@ window.controlPanel = (function() {
      */
     function formatValue(paramName, value, isAtMod) {
         if (isAtMod) {
-            if (value === 0) return '0';
-            return (value > 0 ? '+' : '') + value.toFixed(2);
+            const base = PARAMS[paramName.replace('_atMod', '')] || {};
+            const unit = base.atModUnit || '';
+            // Whole-number detents (e.g. semitones) read cleaner without decimals.
+            const digits = (base.atModStep && Number.isInteger(base.atModStep)) ? 0 : 2;
+            if (value === 0) return '0' + unit;
+            return (value > 0 ? '+' : '') + value.toFixed(digits) + unit;
         }
         
         const config = PARAMS[paramName];
@@ -367,7 +403,7 @@ window.controlPanel = (function() {
             { title: 'Filter', params: ['baseCutoff', 'filterQ'] },
             { title: 'Filter Envelope', params: ['filterEnvAmount', 'filterEnvAttack', 'filterEnvDecay', 'filterEnvSustain', 'filterEnvRelease'] },
             { title: 'Amp Envelope', params: ['ampEnvAttack', 'ampEnvDecay', 'ampEnvSustain', 'ampEnvRelease'] },
-            { title: 'Vibrato', params: ['vibratoRate', 'vibratoDepth'] },
+            { title: 'Vibrato', params: ['vibratoRate', 'vibratoDepth', 'pitchBend'] },
             { title: 'Tremolo', params: ['tremoloRate', 'tremoloDepth'] },
         ];
         

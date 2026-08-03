@@ -93,6 +93,7 @@ struct ParamsTelemetry {
     float filterEnvAmount_atMod;
     float vibratoDepth_atMod;
     float tremoloDepth_atMod;
+    float pitchBend_atMod;
 };
 
 inline void to_json(nlohmann::json& j, const ParamsTelemetry& p) {
@@ -118,7 +119,8 @@ inline void to_json(nlohmann::json& j, const ParamsTelemetry& p) {
         {"baseCutoff_atMod", p.baseCutoff_atMod},
         {"filterEnvAmount_atMod", p.filterEnvAmount_atMod},
         {"vibratoDepth_atMod", p.vibratoDepth_atMod},
-        {"tremoloDepth_atMod", p.tremoloDepth_atMod}
+        {"tremoloDepth_atMod", p.tremoloDepth_atMod},
+        {"pitchBend_atMod", p.pitchBend_atMod}
     };
 }
 

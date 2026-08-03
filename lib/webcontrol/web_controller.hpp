@@ -300,6 +300,9 @@ private:
         else if (param == "tremoloDepth_atMod") {
             forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setTremoloDepthAtMod(value); });
         }
+        else if (param == "pitchBend_atMod") {
+            forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setPitchBendAtMod(value); });
+        }
         // Externally-registered params (e.g. keyboard aftertouch range)
         else if (!applyExternalParam(param, value)) {
             logWarn("Unknown parameter: %s", param.c_str());
@@ -349,6 +352,7 @@ private:
                 params.filterEnvAmount_atMod = v.getFilterEnvAmountAtMod();
                 params.vibratoDepth_atMod = v.getVibratoDepthAtMod();
                 params.tremoloDepth_atMod = v.getTremoloDepthAtMod();
+                params.pitchBend_atMod = v.getPitchBendAtMod();
                 captured = true;
             }
         });
