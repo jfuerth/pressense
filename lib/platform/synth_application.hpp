@@ -196,7 +196,7 @@ private:
         switch(cc) {
             case 1: // Modulation wheel -> waveform shape
                 voicePool_->forEachVoice([normalized](synth::WavetableSynth& voice) {
-                    voice.getOscillator().updateWavetable(normalized);
+                    voice.setWaveformShape(normalized);
                 });
                 break;
             case 20: { // Filter cutoff (exponential 100Hz - 10kHz)
@@ -210,7 +210,8 @@ private:
                 break;
             case 21: // Filter resonance (Q 0.1 - 20.0)
                 voicePool_->forEachVoice([normalized](synth::WavetableSynth& voice) {
-                    voice.getFilter().setQ(0.1f + normalized * 19.9f);
+                    voice.setFilterQ(synth::WavetableSynth::FILTER_Q_MIN + normalized *
+                        (synth::WavetableSynth::FILTER_Q_MAX - synth::WavetableSynth::FILTER_Q_MIN));
                 });
                 break;
             case 71: // Filter envelope attack (1ms - 2s)

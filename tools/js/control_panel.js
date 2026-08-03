@@ -12,11 +12,11 @@ window.controlPanel = (function() {
         aftertouchMaxRatio: { min: 2, max: 15, label: 'AT Max', unit: '', hasAtMod: false },
 
         // Oscillator
-        waveformShape: { min: 0, max: 1, label: 'Waveform', unit: '', hasAtMod: false },
-        
+        waveformShape: { min: 0, max: 1, label: 'Waveform', unit: '', hasAtMod: true },
+
         // Filter
         baseCutoff: { min: 20, max: 20000, label: 'Cutoff', unit: 'Hz', log: true, hasAtMod: true },
-        filterQ: { min: 0.1, max: 20, label: 'Resonance', unit: '', hasAtMod: false },
+        filterQ: { min: 0.1, max: 20, label: 'Resonance', unit: '', hasAtMod: true },
         
         // Filter Envelope
         filterEnvAmount: { min: 0, max: 1, label: 'Env Amount', unit: '', hasAtMod: true },
@@ -32,11 +32,11 @@ window.controlPanel = (function() {
         ampEnvRelease: { min: 0.01, max: 5, label: 'Release', unit: 's', log: true, hasAtMod: false },
         
         // Vibrato
-        vibratoRate: { min: 0.1, max: 20, label: 'Rate', unit: 'Hz', hasAtMod: false },
+        vibratoRate: { min: 0.1, max: 20, label: 'Rate', unit: 'Hz', hasAtMod: true },
         vibratoDepth: { min: 0, max: 1, label: 'Depth', unit: 'st', hasAtMod: true },
-        
+
         // Tremolo
-        tremoloRate: { min: 0.1, max: 20, label: 'Rate', unit: 'Hz', hasAtMod: false },
+        tremoloRate: { min: 0.1, max: 20, label: 'Rate', unit: 'Hz', hasAtMod: true },
         tremoloDepth: { min: 0, max: 1, label: 'Depth', unit: '', hasAtMod: true },
 
         // Pitch bend: aftertouch-only. No primary knob (pitch bend itself comes
@@ -56,8 +56,14 @@ window.controlPanel = (function() {
         };
     }
 
-    // Aftertouch mod params (informational; the real wiring is PARAMS[*].hasAtMod)
-    const AT_MOD_PARAMS = ['baseCutoff_atMod', 'filterEnvAmount_atMod', 'vibratoDepth_atMod', 'tremoloDepth_atMod', 'pitchBend_atMod'];
+    // Aftertouch mod params (informational; the real wiring is PARAMS[*].hasAtMod).
+    // This is the full set the firmware supports - see WavetableSynth's
+    // "Aftertouch Modulation Amounts" section.
+    const AT_MOD_PARAMS = [
+        'waveformShape_atMod', 'baseCutoff_atMod', 'filterQ_atMod',
+        'filterEnvAmount_atMod', 'vibratoRate_atMod', 'vibratoDepth_atMod',
+        'tremoloRate_atMod', 'tremoloDepth_atMod', 'pitchBend_atMod'
+    ];
     
     // Current parameter values
     let currentParams = {};
@@ -65,7 +71,15 @@ window.controlPanel = (function() {
     // Debounce timer for parameter changes
     let sendTimer = null;
     const SEND_DELAY = 50; // ms
-    
+
+    // Drag/tap tuning. Knobs are driven by vertical drags: DRAG_RANGE_PX of
+    // travel sweeps the parameter's whole range.
+    const DRAG_RANGE_PX = 200;
+    // A press that stays within TAP_SLOP_PX is a tap, not a drag. Two taps inside
+    // DOUBLE_TAP_MS reset an AT Mod knob to zero.
+    const TAP_SLOP_PX = 10;
+    const DOUBLE_TAP_MS = 350;
+
     /**
      * Create a rotary knob element
      * @param {string} paramName Parameter name
@@ -110,17 +124,14 @@ window.controlPanel = (function() {
         // flagged "missing" instead.
         markKnobUnknown(container, 'pending');
 
-        // Add drag interaction
-        setupKnobDrag(knob, paramName, config, isAtMod, valueDisplay);
+        // Add drag interaction. AT mod knobs additionally reset to 0 on a
+        // double-tap/double-click, which setupKnobDrag wires up.
+        setupKnobDrag(knob, paramName, config, isAtMod, valueDisplay,
+                      isAtMod ? () => {
+                          markKnobValue(container, paramName, 0, true);
+                          scheduleParamSend(paramName, 0);
+                      } : null);
 
-        // Double-click to reset AT mod knobs to 0
-        if (isAtMod) {
-            knob.addEventListener('dblclick', () => {
-                markKnobValue(container, paramName, 0, true);
-                scheduleParamSend(paramName, 0);
-            });
-        }
-        
         return container;
     }
     
@@ -151,46 +162,93 @@ window.controlPanel = (function() {
     
     /**
      * Setup drag interaction for a knob
+     *
+     * Built on Pointer Events, which deliver mouse, touch and pen through one
+     * code path. Two things make this work on a touch screen where a
+     * mouse/touch event pair would not:
+     *
+     * - Pointer capture. Once a drag starts, every move for that pointer is
+     *   routed to this knob even after the finger leaves the small dial, so the
+     *   drag doesn't die the moment it strays sideways. It also means the
+     *   listeners live on the knob rather than the document, so two fingers on
+     *   two knobs each drive their own knob (the old code always read
+     *   touches[0]).
+     * - `touch-action: none` on .knob (see the stylesheet). Without it the
+     *   browser claims the vertical drag for page scrolling and stops sending
+     *   move events at all.
+     *
+     * @param {Function|null} onDoubleTap Called on a double-tap/double-click
+     *   (used to zero AT mod knobs). `dblclick` alone never fires for touch.
      */
-    function setupKnobDrag(knob, paramName, config, isAtMod, valueDisplay) {
-        let isDragging = false;
-        let startY = 0;
-        let startValue = 0;
-        
+    function setupKnobDrag(knob, paramName, config, isAtMod, valueDisplay, onDoubleTap) {
+        let activePointerId = null;
+        let startY = 0;         // where the press landed, for tap-vs-drag
+        let maxTravel = 0;      // furthest the pointer got from startY, in px
+        let dragEngaged = false;
+        let anchorY = 0;        // where the drag proper began
+        let anchorValue = 0;
+        let lastTapTime = 0;
+
         const handleStart = (e) => {
+            // One drag at a time per knob; ignore a second finger landing on it.
+            if (activePointerId !== null) return;
+            // Only the primary mouse button drags (touch/pen report button 0).
+            if (e.button > 0) return;
             // Can't drag a control with no known value (pending, or removed from
             // firmware). It becomes draggable once the device reports a value.
             if (!(paramName in currentParams)) return;
-            isDragging = true;
-            startY = e.clientY || e.touches[0].clientY;
-            startValue = currentParams[paramName];
+
+            activePointerId = e.pointerId;
+            startY = e.clientY;
+            maxTravel = 0;
+            dragEngaged = false;
             knob.classList.add('active');
+            if (knob.setPointerCapture) {
+                knob.setPointerCapture(e.pointerId);
+            }
             e.preventDefault();
         };
-        
+
         const handleMove = (e) => {
-            if (!isDragging) return;
-            
-            const currentY = e.clientY || e.touches[0].clientY;
-            const deltaY = startY - currentY; // Inverted: up increases value
-            
+            if (e.pointerId !== activePointerId) return;
+
+            maxTravel = Math.max(maxTravel, Math.abs(startY - e.clientY));
+
+            if (!dragEngaged) {
+                // Still within the slop, so this could yet be a tap. Moving the
+                // value now would make every tap nudge the knob, which on a
+                // touch screen happens constantly.
+                if (maxTravel <= TAP_SLOP_PX) return;
+                // The drag starts here. Anchor it at the edge of the slop zone,
+                // not at the press origin (which would jump the value by the slop
+                // distance) and not at the current position (which would discard
+                // the travel so far, stalling a drag whose move events are
+                // coarse). From here the knob tracks the finger 1:1.
+                dragEngaged = true;
+                anchorY = startY + (e.clientY < startY ? -TAP_SLOP_PX : TAP_SLOP_PX);
+                anchorValue = currentParams[paramName];
+            }
+
+            const deltaY = anchorY - e.clientY; // Inverted: up increases value
+            const startValue = anchorValue;
+
             // Calculate sensitivity based on range
             const atRange = isAtMod ? atModRange(config) : null;
             const range = isAtMod ? (atRange.max - atRange.min) : (config.max - config.min);
-            const sensitivity = range / 200; // 200 pixels for full range
-            
+            const sensitivity = range / DRAG_RANGE_PX;
+
             let newValue;
             if (config.log && !isAtMod) {
                 // Logarithmic scaling for frequency-like parameters
                 const logMin = Math.log(config.min);
                 const logMax = Math.log(config.max);
                 const logStart = Math.log(startValue);
-                const logDelta = (logMax - logMin) * (deltaY / 200);
+                const logDelta = (logMax - logMin) * (deltaY / DRAG_RANGE_PX);
                 newValue = Math.exp(logStart + logDelta);
             } else {
                 newValue = startValue + deltaY * sensitivity;
             }
-            
+
             // Clamp to range
             const min = isAtMod ? atRange.min : config.min;
             const max = isAtMod ? atRange.max : config.max;
@@ -203,28 +261,56 @@ window.controlPanel = (function() {
             if (step) {
                 newValue = Math.round(newValue / step) * step;
             }
-            
+
             // Update display and send
             currentParams[paramName] = newValue;
             setKnobRotation(knob, valueToRotation(paramName, newValue, isAtMod));
             valueDisplay.textContent = formatValue(paramName, newValue, isAtMod);
-            
+
             scheduleParamSend(paramName, newValue);
+            e.preventDefault();
         };
-        
-        const handleEnd = () => {
-            if (isDragging) {
-                isDragging = false;
-                knob.classList.remove('active');
+
+        const handleEnd = (e) => {
+            if (e.pointerId !== activePointerId) return;
+            activePointerId = null;
+            knob.classList.remove('active');
+
+            if (!onDoubleTap) return;
+
+            // The press never became a drag, so treat it as a tap and see if it
+            // completes a pair. Timestamps come from the event so a stalled main
+            // thread can't turn two slow taps into a double.
+            if (!dragEngaged) {
+                const now = e.timeStamp;
+                if (now - lastTapTime <= DOUBLE_TAP_MS) {
+                    onDoubleTap();
+                    lastTapTime = 0;   // don't let a third tap re-trigger
+                } else {
+                    lastTapTime = now;
+                }
+            } else {
+                lastTapTime = 0;
             }
         };
-        
-        knob.addEventListener('mousedown', handleStart);
-        knob.addEventListener('touchstart', handleStart);
-        document.addEventListener('mousemove', handleMove);
-        document.addEventListener('touchmove', handleMove);
-        document.addEventListener('mouseup', handleEnd);
-        document.addEventListener('touchend', handleEnd);
+
+        // An interrupted gesture is neither a drag nor a tap, so it must not
+        // count toward a double-tap.
+        const handleCancel = (e) => {
+            if (e.pointerId !== activePointerId) return;
+            activePointerId = null;
+            dragEngaged = false;
+            lastTapTime = 0;
+            knob.classList.remove('active');
+        };
+
+        knob.addEventListener('pointerdown', handleStart);
+        knob.addEventListener('pointermove', handleMove);
+        knob.addEventListener('pointerup', handleEnd);
+        knob.addEventListener('pointercancel', handleCancel);
+        // Long-press on a touch screen otherwise pops the browser's context menu
+        // mid-drag.
+        knob.addEventListener('contextmenu', (e) => e.preventDefault());
     }
     
     /**

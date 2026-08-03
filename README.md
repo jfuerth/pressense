@@ -19,7 +19,8 @@ High-level architecture, from input side to output side:
   * Currently one implementation: subtractive synthesizer with morphable Sawtooth/Triangle/Square waveforms
   * Reusable biquad filter, composable with envelope generator
   * Reusable ADSR envelope generator
-  * Reusable LFO (vibrato and tremolo) and aftertouch modulation of filter cutoff, filter envelope amount, vibrato depth, tremolo depth, and pitch bend (up to ±12 semitones, interpolated by pressure)
+  * Reusable LFO (vibrato and tremolo)
+  * Aftertouch modulation of every continuous timbre parameter, interpolated by pressure: waveform shape, filter cutoff, resonance, filter envelope amount, vibrato rate/depth, tremolo rate/depth, and pitch bend (up to ±12 semitones)
   * Voice mixing with various clipping/distortion algorithms
   * There's room to implement other types of synth engines without worrying about note-to-voice allocation, mixdown, etc.
   * Future idea: could implement a tracker module that ignores the voice allocator and drives voices directly (one voice per track)

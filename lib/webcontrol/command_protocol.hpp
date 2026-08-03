@@ -93,6 +93,10 @@ struct ParamsTelemetry {
     float filterEnvAmount_atMod;
     float vibratoDepth_atMod;
     float tremoloDepth_atMod;
+    float waveformShape_atMod;
+    float filterQ_atMod;
+    float vibratoRate_atMod;
+    float tremoloRate_atMod;
     float pitchBend_atMod;
 };
 
@@ -120,6 +124,10 @@ inline void to_json(nlohmann::json& j, const ParamsTelemetry& p) {
         {"filterEnvAmount_atMod", p.filterEnvAmount_atMod},
         {"vibratoDepth_atMod", p.vibratoDepth_atMod},
         {"tremoloDepth_atMod", p.tremoloDepth_atMod},
+        {"waveformShape_atMod", p.waveformShape_atMod},
+        {"filterQ_atMod", p.filterQ_atMod},
+        {"vibratoRate_atMod", p.vibratoRate_atMod},
+        {"tremoloRate_atMod", p.tremoloRate_atMod},
         {"pitchBend_atMod", p.pitchBend_atMod}
     };
 }

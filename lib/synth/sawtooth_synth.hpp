@@ -26,11 +26,29 @@ namespace synth {
  * 
  * Filter envelope modulates cutoff frequency relative to base cutoff (from timbre).
  * Filter envelope amount controls modulation depth.
- * Aftertouch can modulate filter cutoff, filter env amount, vibrato, and tremolo.
+ * Aftertouch can modulate waveform shape, filter cutoff, resonance, filter env
+ * amount, vibrato rate/depth, tremolo rate/depth, and pitch bend.
+ *
+ * Every aftertouch-modulatable parameter is owned by this class rather than by
+ * the component it drives, because the component holds the *modulated* value
+ * while a key is held. The getters below always report the unmodulated baseline,
+ * which is what program save and the control panel need. As a consequence,
+ * shape and resonance must be set through setWaveformShape()/setFilterQ(), not
+ * through getOscillator()/getFilter() -- a direct write there is overwritten by
+ * the next rendered sample.
  */
 class WavetableSynth : public Voice {
 public:
-    WavetableSynth(float sampleRate = 44100.0f) 
+    // Ranges over which the additively-modulated parameters sweep. An atMod of
+    // 1.0 at full pressure moves the parameter by the whole span, so every
+    // setting is reachable from any baseline. These match the CC mappings in
+    // platform/synth_application.hpp and the knob ranges in the control panel.
+    static constexpr float FILTER_Q_MIN = 0.1f;
+    static constexpr float FILTER_Q_MAX = 20.0f;
+    static constexpr float LFO_RATE_MIN = 0.1f;
+    static constexpr float LFO_RATE_MAX = 20.0f;
+
+    WavetableSynth(float sampleRate = 44100.0f)
         : sampleRate_(sampleRate),
           oscillator_(sampleRate),
           filter_(sampleRate),
@@ -40,13 +58,20 @@ public:
           tremoloLfo_(sampleRate) {
         // Initialize filter with default settings
         filter_.setMode(BiquadFilter::Mode::LOWPASS);
-        filter_.setQ(0.707f);  // Butterworth response
-        
+        setFilterQ(0.707f);  // Butterworth response
+
         // Initialize filter envelope with defaults
         filterEnvelope_.setAttackTime(0.005f);   // 5ms
         filterEnvelope_.setDecayTime(0.2f);      // 200ms
         filterEnvelope_.setSustainLevel(0.3f);
         filterEnvelope_.setReleaseTime(0.1f);    // 100ms
+
+        // Seed the baseline caches from the components' own defaults, so the
+        // getters are correct before anything is explicitly set and the first
+        // rendered sample has no spurious change to apply.
+        setWaveformShape(oscillator_.getShape());
+        setVibratoRate(vibratoLfo_.getRate());
+        setTremoloRate(tremoloLfo_.getRate());
     }
     
     void trigger(float frequencyHz, float volume) override {
@@ -55,6 +80,13 @@ public:
         aftertouch_ = 0.0f;  // Reset aftertouch on new note
         oscillator_.reset();
         filter_.reset();  // Clear filter state for clean attack
+        // Aftertouch is back to zero, so return the modulated sub-components to
+        // their baselines. Without this a new note would inherit the previous
+        // note's modulated shape/resonance/rates up to the moved() thresholds.
+        setWaveformShape(waveformShape_);
+        setFilterQ(filterQ_);
+        setVibratoRate(vibratoRate_);
+        setTremoloRate(tremoloRate_);
         vibratoLfo_.reset();
         tremoloLfo_.reset();
         ampEnvelope_.trigger();
@@ -92,18 +124,56 @@ public:
 
     /**
      * @brief Get oscillator for direct parameter control from CC callbacks
+     *
+     * Do not set the waveform shape here; use setWaveformShape() so the
+     * baseline survives aftertouch modulation.
      */
     WavetableOscillator& getOscillator() {
         return oscillator_;
     }
-    
+
     /**
      * @brief Get filter for direct parameter control from CC callbacks
+     *
+     * Do not set Q here; use setFilterQ() so the baseline survives aftertouch
+     * modulation. Cutoff and mode are fine to set directly.
      */
     BiquadFilter& getFilter() {
         return filter_;
     }
-    
+
+    /**
+     * @brief Set the base waveform morph (0=sawtooth, 0.5=triangle, 1=square)
+     */
+    void setWaveformShape(float shape) {
+        if (shape < 0.0f) shape = 0.0f;
+        if (shape > 1.0f) shape = 1.0f;
+        waveformShape_ = shape;
+        appliedWaveformShape_ = shape;
+        oscillator_.updateWavetable(shape);
+    }
+
+    /**
+     * @brief Get the base waveform morph (before aftertouch modulation)
+     */
+    float getWaveformShape() const { return waveformShape_; }
+
+    /**
+     * @brief Set the base filter resonance (before aftertouch modulation)
+     */
+    void setFilterQ(float q) {
+        if (q < FILTER_Q_MIN) q = FILTER_Q_MIN;
+        if (q > FILTER_Q_MAX) q = FILTER_Q_MAX;
+        filterQ_ = q;
+        appliedFilterQ_ = q;
+        filter_.setQ(q);
+    }
+
+    /**
+     * @brief Get the base filter resonance (before aftertouch modulation)
+     */
+    float getFilterQ() const { return filterQ_; }
+
     /**
      * @brief Set base filter cutoff (controlled by CC, before envelope modulation)
      */
@@ -149,17 +219,44 @@ public:
     AdsrEnvelope& getAmpEnvelope() {
         return ampEnvelope_;
     }
-    
+
+    /**
+     * @brief Get the vibrato LFO
+     *
+     * Its rate and depth carry the aftertouch-modulated values while a key is
+     * held; set the baselines via setVibratoRate()/setVibratoDepth().
+     */
+    Lfo& getVibratoLfo() {
+        return vibratoLfo_;
+    }
+
+    /**
+     * @brief Get the tremolo LFO
+     *
+     * Its rate and depth carry the aftertouch-modulated values while a key is
+     * held; set the baselines via setTremoloRate()/setTremoloDepth().
+     */
+    Lfo& getTremoloLfo() {
+        return tremoloLfo_;
+    }
+
     // ===== Vibrato (pitch LFO) =====
     
+    // Clamped to the same span the aftertouch modulation sweeps, so the baseline
+    // reported here is always the one actually being rendered.
     void setVibratoRate(float rateHz) {
+        if (rateHz < LFO_RATE_MIN) rateHz = LFO_RATE_MIN;
+        if (rateHz > LFO_RATE_MAX) rateHz = LFO_RATE_MAX;
+        vibratoRate_ = rateHz;
+        appliedVibratoRate_ = rateHz;
         vibratoLfo_.setRate(rateHz);
     }
-    
+
+    // The baseline rate, not the LFO's current (possibly aftertouch-modulated) one.
     float getVibratoRate() const {
-        return vibratoLfo_.getRate();
+        return vibratoRate_;
     }
-    
+
     void setVibratoDepth(float semitones) {
         vibratoDepth_ = semitones;
     }
@@ -170,14 +267,21 @@ public:
     
     // ===== Tremolo (amplitude LFO) =====
     
+    // Clamped to the same span the aftertouch modulation sweeps, so the baseline
+    // reported here is always the one actually being rendered.
     void setTremoloRate(float rateHz) {
+        if (rateHz < LFO_RATE_MIN) rateHz = LFO_RATE_MIN;
+        if (rateHz > LFO_RATE_MAX) rateHz = LFO_RATE_MAX;
+        tremoloRate_ = rateHz;
+        appliedTremoloRate_ = rateHz;
         tremoloLfo_.setRate(rateHz);
     }
-    
+
+    // The baseline rate, not the LFO's current (possibly aftertouch-modulated) one.
     float getTremoloRate() const {
-        return tremoloLfo_.getRate();
+        return tremoloRate_;
     }
-    
+
     void setTremoloDepth(float depth) {
         tremoloDepth_ = depth;
         if (tremoloDepth_ < 0.0f) tremoloDepth_ = 0.0f;
@@ -207,10 +311,27 @@ public:
     // ===== Aftertouch Modulation Amounts =====
     // These control how much aftertouch affects each parameter
     // Range: [-1.0, 1.0], 0 = no effect
-    
+    //
+    // Two modulation laws are in play (see aftertouch_modulator.hpp):
+    // multiplicative, baseline * (1 + aftertouch * atMod), for parameters whose
+    // baseline is never zero; and additive, baseline + aftertouch * atMod * span,
+    // for the rest, so that a baseline of zero can still be modulated.
+
     void setBaseCutoffAtMod(float amount) { baseCutoff_atMod_ = amount; }
     float getBaseCutoffAtMod() const { return baseCutoff_atMod_; }
-    
+
+    void setWaveformShapeAtMod(float amount) { waveformShape_atMod_ = amount; }
+    float getWaveformShapeAtMod() const { return waveformShape_atMod_; }
+
+    void setFilterQAtMod(float amount) { filterQ_atMod_ = amount; }
+    float getFilterQAtMod() const { return filterQ_atMod_; }
+
+    void setVibratoRateAtMod(float amount) { vibratoRate_atMod_ = amount; }
+    float getVibratoRateAtMod() const { return vibratoRate_atMod_; }
+
+    void setTremoloRateAtMod(float amount) { tremoloRate_atMod_ = amount; }
+    float getTremoloRateAtMod() const { return tremoloRate_atMod_; }
+
     void setFilterEnvAmountAtMod(float amount) { filterEnvAmount_atMod_ = amount; }
     float getFilterEnvAmountAtMod() const { return filterEnvAmount_atMod_; }
     
@@ -252,7 +373,17 @@ public:
         // Vibrato and tremolo use additive modulation (can start from 0)
         float effectiveVibratoDepth = vibratoDepth_ + aftertouch_ * vibratoDepth_atMod_;
         float effectiveTremoloDepth = tremoloDepth_ + aftertouch_ * tremoloDepth_atMod_;
-        
+        // Shape, resonance and the LFO rates are additive over their full span,
+        // so full pressure at atMod=1 sweeps the parameter end to end. Shape's
+        // span is 1.0, so it needs no explicit factor.
+        float effectiveShape = waveformShape_ + aftertouch_ * waveformShape_atMod_;
+        float effectiveFilterQ = filterQ_ +
+            aftertouch_ * filterQ_atMod_ * (FILTER_Q_MAX - FILTER_Q_MIN);
+        float effectiveVibratoRate = vibratoRate_ +
+            aftertouch_ * vibratoRate_atMod_ * (LFO_RATE_MAX - LFO_RATE_MIN);
+        float effectiveTremoloRate = tremoloRate_ +
+            aftertouch_ * tremoloRate_atMod_ * (LFO_RATE_MAX - LFO_RATE_MIN);
+
         // Clamp values to valid ranges
         if (effectiveCutoff < 20.0f) effectiveCutoff = 20.0f;
         if (effectiveCutoff > 20000.0f) effectiveCutoff = 20000.0f;
@@ -261,12 +392,25 @@ public:
         if (effectiveVibratoDepth < 0.0f) effectiveVibratoDepth = 0.0f;
         if (effectiveTremoloDepth < 0.0f) effectiveTremoloDepth = 0.0f;
         if (effectiveTremoloDepth > 1.0f) effectiveTremoloDepth = 1.0f;
-        
-        // Calculate vibrato (pitch modulation)
+        if (effectiveShape < 0.0f) effectiveShape = 0.0f;
+        if (effectiveShape > 1.0f) effectiveShape = 1.0f;
+        if (effectiveFilterQ < FILTER_Q_MIN) effectiveFilterQ = FILTER_Q_MIN;
+        if (effectiveFilterQ > FILTER_Q_MAX) effectiveFilterQ = FILTER_Q_MAX;
+        if (effectiveVibratoRate < LFO_RATE_MIN) effectiveVibratoRate = LFO_RATE_MIN;
+        if (effectiveVibratoRate > LFO_RATE_MAX) effectiveVibratoRate = LFO_RATE_MAX;
+        if (effectiveTremoloRate < LFO_RATE_MIN) effectiveTremoloRate = LFO_RATE_MIN;
+        if (effectiveTremoloRate > LFO_RATE_MAX) effectiveTremoloRate = LFO_RATE_MAX;
+
+        // Calculate vibrato (pitch modulation). setRate() costs a divide, so it
+        // is only re-applied when the rate has actually moved (see moved()).
         timer.nextSpan("synth:vibrato");
+        if (moved(effectiveVibratoRate, appliedVibratoRate_, 0.01f)) {
+            appliedVibratoRate_ = effectiveVibratoRate;
+            vibratoLfo_.setRate(effectiveVibratoRate);
+        }
         vibratoLfo_.setDepth(effectiveVibratoDepth);
         float vibratoMod = vibratoLfo_.nextSample();  // Returns semitone offset
-        
+
         // Calculate current frequency with pitch bend and vibrato.
         // Aftertouch adds a further linear bend (semitones) on top of the MIDI
         // pitch wheel and vibrato; all three sources sum in the semitone domain.
@@ -290,10 +434,15 @@ public:
         }
         float frequency = cachedFrequency_;
         
-        // Generate oscillator sample
+        // Generate oscillator sample. updateWavetable() only recomputes three
+        // blend weights, but skip it when the morph hasn't moved audibly.
         timer.nextSpan("synth:oscillator");
+        if (moved(effectiveShape, appliedWaveformShape_, 0.002f)) {
+            appliedWaveformShape_ = effectiveShape;
+            oscillator_.updateWavetable(effectiveShape);
+        }
         float sample = oscillator_.nextSample(frequency);
-        
+
         // Calculate filter cutoff with envelope modulation
         timer.nextSpan("synth:filter_env");
         float filterEnvLevel = filterEnvelope_.nextSample();
@@ -302,14 +451,26 @@ public:
         // Apply modulation (exponential, upward only)
         float modulatedCutoff = effectiveCutoff * (1.0f + envModulation * 9.0f);  // Up to 10x base cutoff
         
+        // Resonance is applied before the cutoff so that a single coefficient
+        // recompute can pick up both. Like BiquadFilter::setCutoff, small changes
+        // are skipped: recomputing coefficients costs a sinf/cosf pair, and 3% of
+        // the Q span is well below the audible threshold for resonance.
         timer.nextSpan("synth:filter");
+        if (moved(effectiveFilterQ, appliedFilterQ_, 0.03f * (FILTER_Q_MAX - FILTER_Q_MIN))) {
+            appliedFilterQ_ = effectiveFilterQ;
+            filter_.setQ(effectiveFilterQ);
+        }
         filter_.setCutoff(modulatedCutoff);
-        
+
         // Apply filter
         sample = filter_.processSample(sample);
         
         // Calculate tremolo (amplitude modulation)
         timer.nextSpan("synth:tremolo");
+        if (moved(effectiveTremoloRate, appliedTremoloRate_, 0.01f)) {
+            appliedTremoloRate_ = effectiveTremoloRate;
+            tremoloLfo_.setRate(effectiveTremoloRate);
+        }
         tremoloLfo_.setDepth(effectiveTremoloDepth);
         float tremoloMod = tremoloLfo_.nextSample();  // Returns [-depth, +depth]
         float tremoloMultiplier = 1.0f + tremoloMod;  // Range: [1-depth, 1+depth]
@@ -323,8 +484,22 @@ public:
     }
 
 private:
+    /**
+     * @brief Has a control-rate value moved enough to be worth re-applying?
+     *
+     * The effective values in nextSample() are recomputed every sample but only
+     * actually change when aftertouch or a base parameter does. Pushing an
+     * unchanged (or inaudibly changed) value into a component would repeat its
+     * setup cost - biquad coefficients, an LFO phase increment - for nothing.
+     */
+    static inline bool moved(float value, float applied, float epsilon) {
+        float delta = value - applied;
+        if (delta < 0.0f) delta = -delta;
+        return delta > epsilon;
+    }
+
     float sampleRate_;
-    
+
     // Components (composed by value for cache locality and inlining)
     WavetableOscillator oscillator_;
     BiquadFilter filter_;
@@ -340,20 +515,39 @@ private:
     float pitchBendRange_ = 2.0f;
     float baseCutoff_ = 1000.0f;    // Base filter cutoff (controlled by setter)
     float filterEnvAmount_ = 0.5f;  // 50% modulation by default
-    
+
     // LFO parameters (depth stored separately for aftertouch modulation)
     float vibratoDepth_ = 0.0f;     // Semitones
     float tremoloDepth_ = 0.0f;     // 0-1 amplitude modulation
-    
+
+    // Baselines for parameters that live in a sub-component but are aftertouch
+    // modulated, so the component holds the modulated value while a key is held.
+    // Seeded from the components' defaults by the constructor.
+    float waveformShape_ = 0.0f;
+    float filterQ_ = 0.707f;
+    float vibratoRate_ = 5.0f;      // Hz
+    float tremoloRate_ = 5.0f;      // Hz
+
     // Per-voice aftertouch
     float aftertouch_ = 0.0f;       // Normalized [0, 1]
-    
+
     // Aftertouch modulation amounts [-1, 1]
     float baseCutoff_atMod_ = 0.0f;
     float filterEnvAmount_atMod_ = 0.0f;
     float vibratoDepth_atMod_ = 0.0f;
     float tremoloDepth_atMod_ = 0.0f;
+    float waveformShape_atMod_ = 0.0f;
+    float filterQ_atMod_ = 0.0f;
+    float vibratoRate_atMod_ = 0.0f;
+    float tremoloRate_atMod_ = 0.0f;
     float pitchBend_atMod_ = 0.0f;  // Semitones [-12, +12] (not a [-1,1] scaler)
+
+    // Last value pushed into each sub-component, so nextSample() can skip
+    // re-applying an unchanged one. Kept in sync by the baseline setters.
+    float appliedWaveformShape_ = 0.0f;
+    float appliedFilterQ_ = 0.707f;
+    float appliedVibratoRate_ = 5.0f;
+    float appliedTremoloRate_ = 5.0f;
 
     // Cache for the semitone->frequency mapping, so a held/slowly-modulated note
     // avoids calling std::pow every sample. cachedBaseFrequency_ starts at a

@@ -61,6 +61,10 @@ struct ProgramData {
     float filterEnvAmount_atMod = 0.0f;
     float vibratoDepth_atMod = 0.0f;
     float tremoloDepth_atMod = 0.0f;
+    float waveformShape_atMod = 0.0f;
+    float filterQ_atMod = 0.0f;
+    float vibratoRate_atMod = 0.0f;
+    float tremoloRate_atMod = 0.0f;
     float pitchBend_atMod = 0.0f;  // Semitones [-12, +12] bent at full aftertouch
     
     /**
@@ -72,9 +76,9 @@ struct ProgramData {
         forEachVoice([&](synth::Voice& voice) {
             if (!captured) {
                 auto& ws = static_cast<synth::WavetableSynth&>(voice);
-                waveformShape = ws.getOscillator().getShape();
+                waveformShape = ws.getWaveformShape();
                 baseCutoff = ws.getBaseCutoff();
-                filterQ = ws.getFilter().getQ();
+                filterQ = ws.getFilterQ();
                 filterMode = static_cast<int>(ws.getFilter().getMode());
                 filterEnvAmount = ws.getFilterEnvelopeAmount();
                 filterEnvAttack = ws.getFilterEnvelope().getAttackTime();
@@ -97,6 +101,10 @@ struct ProgramData {
                 filterEnvAmount_atMod = ws.getFilterEnvAmountAtMod();
                 vibratoDepth_atMod = ws.getVibratoDepthAtMod();
                 tremoloDepth_atMod = ws.getTremoloDepthAtMod();
+                waveformShape_atMod = ws.getWaveformShapeAtMod();
+                filterQ_atMod = ws.getFilterQAtMod();
+                vibratoRate_atMod = ws.getVibratoRateAtMod();
+                tremoloRate_atMod = ws.getTremoloRateAtMod();
                 pitchBend_atMod = ws.getPitchBendAtMod();
                 captured = true;
             }
@@ -114,11 +122,11 @@ inline void applyProgramToVoices(const ProgramData& program, VoiceIterator forEa
         auto& ws = static_cast<synth::WavetableSynth&>(voice);
         
         // Apply oscillator settings
-        ws.getOscillator().updateWavetable(program.waveformShape);
-        
+        ws.setWaveformShape(program.waveformShape);
+
         // Apply filter settings
         ws.setBaseCutoff(program.baseCutoff);
-        ws.getFilter().setQ(program.filterQ);
+        ws.setFilterQ(program.filterQ);
         ws.getFilter().setMode(static_cast<synth::BiquadFilter::Mode>(program.filterMode));
         
         // Apply filter envelope settings
@@ -147,6 +155,10 @@ inline void applyProgramToVoices(const ProgramData& program, VoiceIterator forEa
         ws.setFilterEnvAmountAtMod(program.filterEnvAmount_atMod);
         ws.setVibratoDepthAtMod(program.vibratoDepth_atMod);
         ws.setTremoloDepthAtMod(program.tremoloDepth_atMod);
+        ws.setWaveformShapeAtMod(program.waveformShape_atMod);
+        ws.setFilterQAtMod(program.filterQ_atMod);
+        ws.setVibratoRateAtMod(program.vibratoRate_atMod);
+        ws.setTremoloRateAtMod(program.tremoloRate_atMod);
         ws.setPitchBendAtMod(program.pitchBend_atMod);
     });
 }
@@ -165,6 +177,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ProgramData,
     vibratoRate, vibratoDepth,
     tremoloRate, tremoloDepth,
     baseCutoff_atMod, filterEnvAmount_atMod, vibratoDepth_atMod, tremoloDepth_atMod,
+    waveformShape_atMod, filterQ_atMod, vibratoRate_atMod, tremoloRate_atMod,
     pitchBend_atMod)
 
 } // namespace midi

@@ -15,6 +15,7 @@ platform):
 * test_common/ -- MIDI stream processing and note routing
 * test_voice_allocation/ -- real-time memory safety of the voice pool (see below)
 * test_synth_pitch/ -- aftertouch pitch-bend DSP path (renders audio, recovers the fundamental)
+* test_synth_aftertouch_mod/ -- aftertouch modulation of shape, resonance and the LFO rates, including the baseline/modulated-value split
 
 The naming convention also reserves two platform-scoped categories for when
 they're needed, each excluded from the other environment via `test_ignore` in

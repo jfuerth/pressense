@@ -231,14 +231,14 @@ private:
     void setParameter(const std::string& param, float value) {
         // Oscillator
         if (param == "waveformShape") {
-            forEachWavetableSynth([value](synth::WavetableSynth& v) { v.getOscillator().updateWavetable(value); });
+            forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setWaveformShape(value); });
         }
         // Filter
         else if (param == "baseCutoff") {
             forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setBaseCutoff(value); });
         }
         else if (param == "filterQ") {
-            forEachWavetableSynth([value](synth::WavetableSynth& v) { v.getFilter().setQ(value); });
+            forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setFilterQ(value); });
         }
         else if (param == "filterMode") {
             int mode = static_cast<int>(value);
@@ -300,6 +300,18 @@ private:
         else if (param == "tremoloDepth_atMod") {
             forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setTremoloDepthAtMod(value); });
         }
+        else if (param == "waveformShape_atMod") {
+            forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setWaveformShapeAtMod(value); });
+        }
+        else if (param == "filterQ_atMod") {
+            forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setFilterQAtMod(value); });
+        }
+        else if (param == "vibratoRate_atMod") {
+            forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setVibratoRateAtMod(value); });
+        }
+        else if (param == "tremoloRate_atMod") {
+            forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setTremoloRateAtMod(value); });
+        }
         else if (param == "pitchBend_atMod") {
             forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setPitchBendAtMod(value); });
         }
@@ -331,9 +343,9 @@ private:
         bool captured = false;
         forEachWavetableSynth([&params, &captured](synth::WavetableSynth& v) {
             if (!captured) {
-                params.waveformShape = v.getOscillator().getShape();
+                params.waveformShape = v.getWaveformShape();
                 params.baseCutoff = v.getBaseCutoff();
-                params.filterQ = v.getFilter().getQ();
+                params.filterQ = v.getFilterQ();
                 params.filterMode = static_cast<int>(v.getFilter().getMode());
                 params.filterEnvAmount = v.getFilterEnvelopeAmount();
                 params.filterEnvAttack = v.getFilterEnvelope().getAttackTime();
@@ -352,6 +364,10 @@ private:
                 params.filterEnvAmount_atMod = v.getFilterEnvAmountAtMod();
                 params.vibratoDepth_atMod = v.getVibratoDepthAtMod();
                 params.tremoloDepth_atMod = v.getTremoloDepthAtMod();
+                params.waveformShape_atMod = v.getWaveformShapeAtMod();
+                params.filterQ_atMod = v.getFilterQAtMod();
+                params.vibratoRate_atMod = v.getVibratoRateAtMod();
+                params.tremoloRate_atMod = v.getTremoloRateAtMod();
                 params.pitchBend_atMod = v.getPitchBendAtMod();
                 captured = true;
             }
