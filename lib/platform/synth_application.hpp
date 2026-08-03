@@ -85,6 +85,12 @@ public:
             [this](auto visitor) { voicePool_->forEachVoice(visitor); },
             programStorage_.get()
         );
+
+        // Let the host play the synth over the control link, through the same
+        // MIDI stream the keyboard uses.
+        webController_->setMidiByteCallback([this](uint8_t byte) {
+            midiProcessor_->process(byte);
+        });
     }
     
     /**
@@ -155,16 +161,32 @@ public:
             monoBuffer_.resize(numFrames);
         }
         
-        // Pass 1: Mix all voices into mono buffer
+        // Pass 1: Mix all voices into the mono buffer.
+        //
+        // Voice-major rather than frame-major, over indexed access rather than
+        // forEachVoice(). Two reasons, both measured (AUDIO_PIPELINE_PERFORMANCE.md):
+        // the old frame-major loop built a std::function every frame and reached
+        // each voice through it, and it ran silent voices as well as sounding
+        // ones. Skipping idle voices is what matters most - a keyboard is rarely
+        // holding all of them - and it makes a one-voice buffer 37% cheaper.
+        //
+        // A silent voice's nextSample() returns 0, so skipping it is exactly
+        // equivalent to summing it.
         timer.nextSpan("app:voice_synthesis");
+        float* mono = monoBuffer_.data();
         for (unsigned int frame = 0; frame < numFrames; ++frame) {
-            float sample = 0.0f;
-            voicePool_->forEachVoice([&sample, &timer](synth::WavetableSynth& synth) {
-                sample += synth.nextSample(timer);
-            });
-            monoBuffer_[frame] = sample;
+            mono[frame] = 0.0f;
         }
-        
+        const size_t voiceCount = voicePool_->getVoiceCount();
+        for (size_t v = 0; v < voiceCount; ++v) {
+            synth::WavetableSynth& voice = voicePool_->voiceAt(v);
+            if (!voice.isActive()) continue;
+            for (unsigned int frame = 0; frame < numFrames; ++frame) {
+                mono[frame] += voice.nextSample(timer);
+            }
+        }
+
+
         // Pass 2: Process with output processor
         timer.nextSpan("app:output_processing");
         outputProcessor_.processBuffer(monoBuffer_.data(), numFrames);

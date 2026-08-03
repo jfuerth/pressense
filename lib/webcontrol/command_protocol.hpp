@@ -17,6 +17,7 @@ enum class CommandType {
     SAVE_PROGRAM,   // Save current settings to program slot: {"cmd": "saveProgram", "bank": 0, "program": 1}
     LOAD_PROGRAM,   // Load settings from program slot: {"cmd": "loadProgram", "bank": 0, "program": 1}
     SET_BASE_NOTE,  // Set keyboard base note: {"cmd": "setBaseNote", "note": 48}
+    MIDI,           // Inject raw MIDI bytes: {"cmd": "midi", "bytes": [144, 60, 100]}
     UNKNOWN
 };
 
@@ -29,6 +30,7 @@ inline CommandType parseCommandType(const std::string& cmd) {
     if (cmd == "saveProgram") return CommandType::SAVE_PROGRAM;
     if (cmd == "loadProgram") return CommandType::LOAD_PROGRAM;
     if (cmd == "setBaseNote") return CommandType::SET_BASE_NOTE;
+    if (cmd == "midi") return CommandType::MIDI;
     return CommandType::UNKNOWN;
 }
 

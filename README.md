@@ -60,6 +60,12 @@ Higher-numbered items can depend on lower-numbered items, but not vice-versa.
 **Browser-Based Tools**
 * *tools/pressence_ui.html* + *tools/js/*: Web Serial control panel and telemetry visualizer. Talks to the device over USB serial using the `lib/webcontrol` JSON protocol; lets you tweak voice parameters in real time, save/load programs, and monitor key-scan telemetry. See [tools/README_telemetry.md](tools/README_telemetry.md).
 
+**Profiling Tools**
+* *tools/run_bench.py*: builds a benchmark firmware, loads it into the RP2350's SRAM (never flash) and captures a cycle-accurate report of every stage of the audio path.
+* *tools/profile_voices.py*: loads the real firmware into SRAM, plays notes over the control link and reads back per-buffer render cost against the audio deadline, swept over voice count.
+
+Measurements, conclusions and the reasoning behind the current shape of the audio path are in [AUDIO_PIPELINE_PERFORMANCE.md](AUDIO_PIPELINE_PERFORMANCE.md). Read it before optimising anything here — several long-standing assumptions in this area turned out to be wrong when measured.
+
 Example hookup on a Linux build (arrows indicate direction of API calls):
 
 ```mermaid

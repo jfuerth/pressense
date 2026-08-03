@@ -53,6 +53,118 @@ struct KeyScanStats {
         , isCalibrated(false)
         , calibrationCount(0)
     {}
+
+    /**
+     * @brief Upper bound on the length of writeJson()'s output, including the NUL
+     *
+     * Five arrays of per-key values; 40 characters per key is comfortably more
+     * than the longest any of them can produce.
+     */
+    static constexpr size_t JSON_CAPACITY = NumKeys * 40u + 256u;
+
+    /**
+     * @brief Serialise to JSON without allocating
+     *
+     * The nlohmann path (to_json below) builds five std::vectors and a
+     * std::string for every report. On the RP2350 that memory traffic runs on the
+     * same bus as audio rendering on the other core and measurably slows it down
+     * - about 18% of the render deadline at full polyphony. This writes straight
+     * into a caller-owned buffer instead. Output is identical in shape, so the
+     * control panel does not care which path produced it.
+     *
+     * @return Number of characters written, excluding the NUL
+     */
+    size_t writeJson(char* out, size_t capacity) const {
+        JsonWriter w{out, capacity};
+
+        w.raw("{\"type\":\"keyScan\"");
+        w.fmt(",\"keyCount\":%u", (unsigned)keyCount);
+        w.raw(isCalibrated ? ",\"isCalibrated\":true" : ",\"isCalibrated\":false");
+        w.fmt(",\"calibrationCount\":%u", (unsigned)calibrationCount);
+        w.raw(",\"noteOnThreshold\":");   w.number(noteOnThreshold);
+        w.raw(",\"noteOffThreshold\":");  w.number(noteOffThreshold);
+
+        w.raw(",\"readings\":[");
+        for (uint8_t i = 0; i < NumKeys; ++i) {
+            if (i) w.raw(",");
+            w.fmt("%u", (unsigned)readings[i]);
+        }
+        w.raw("],\"baselines\":[");
+        for (uint8_t i = 0; i < NumKeys; ++i) {
+            if (i) w.raw(",");
+            w.number(baselines[i]);
+        }
+        w.raw("],\"ratios\":[");
+        for (uint8_t i = 0; i < NumKeys; ++i) {
+            if (i) w.raw(",");
+            w.number(ratios[i]);
+        }
+        w.raw("],\"noteStates\":[");
+        for (uint8_t i = 0; i < NumKeys; ++i) {
+            if (i) w.raw(",");
+            w.raw(noteStates[i] ? "true" : "false");
+        }
+        w.raw("],\"aftertouchValues\":[");
+        for (uint8_t i = 0; i < NumKeys; ++i) {
+            if (i) w.raw(",");
+            w.fmt("%u", (unsigned)aftertouchValues[i]);
+        }
+        w.raw("]}");
+
+        return w.finish();
+    }
+
+private:
+    /**
+     * @brief Bounds-checked append-only writer over a fixed buffer
+     *
+     * Every append silently stops at the end of the buffer, so a capacity
+     * miscalculation truncates the report rather than corrupting memory.
+     */
+    struct JsonWriter {
+        char* buf;
+        size_t capacity;
+        size_t len = 0;
+
+        size_t room() const { return (len + 1 < capacity) ? capacity - len - 1 : 0; }
+
+        void raw(const char* text) {
+            size_t space = room();
+            while (*text && space--) buf[len++] = *text++;
+        }
+
+        template<typename... Args>
+        void fmt(const char* format, Args... args) {
+            size_t space = room();
+            if (!space) return;
+            int written = snprintf(buf + len, space + 1, format, args...);
+            if (written > 0) {
+                len += (static_cast<size_t>(written) < space) ? written : space;
+            }
+        }
+
+        /**
+         * @brief Append a float with three decimal places
+         *
+         * Hand-rolled because this SDK build links newlib-nano, whose printf
+         * silently emits nothing for %f. Values here are ADC counts and ratios,
+         * so scaling by 1000 cannot overflow a uint32.
+         */
+        void number(float v) {
+            bool negative = v < 0.0f;
+            if (negative) v = -v;
+            // Also rejects NaN and infinity, which would make the cast undefined.
+            if (!(v < 4000000.0f)) { v = 0.0f; negative = false; }
+            uint32_t scaled = static_cast<uint32_t>(v * 1000.0f + 0.5f);
+            fmt("%s%lu.%03lu", negative ? "-" : "",
+                (unsigned long)(scaled / 1000u), (unsigned long)(scaled % 1000u));
+        }
+
+        size_t finish() {
+            if (capacity) buf[len] = '\0';
+            return len;
+        }
+    };
 };
 
 /**
@@ -101,6 +213,12 @@ public:
     static constexpr float AFTERTOUCH_GAMMA = 2.5f;     // Response curve: >1 = slow ramp at first, then steep toward max
     static constexpr float BASELINE_ALPHA = 0.001f;     // Exponential moving average factor
     static constexpr float MIN_BASELINE = 1.0f;         // Minimum baseline to prevent ratio issues
+
+    // Scans between telemetry reports. The scan loop runs at the mains frequency
+    // (~60 Hz), so 6 gives a ~10 Hz display update: fast enough to watch a key
+    // being pressed, slow enough that serialising and shipping it does not
+    // interfere with audio rendering on the other core.
+    static constexpr uint16_t DEFAULT_TELEMETRY_INTERVAL = 6;
     
     /**
      * @brief Construct MIDI keyboard controller
@@ -185,8 +303,17 @@ public:
             processKey(i, readings[i]);
         }
         
-        // Send telemetry if enabled
-        if (telemetryEnabled_) {
+        // Send telemetry if enabled, at a fraction of the scan rate.
+        //
+        // A full scan report is five arrays of per-key values, serialised through
+        // nlohmann into a heap-allocated string and written to USB. Emitting that
+        // every scan (~60 Hz) is enough memory and USB traffic to starve the audio
+        // core on the other side of the chip: it took a single sounding voice from
+        // 33% of the render deadline to 145%, i.e. audible dropouts. It is a
+        // diagnostic display, so a UI-rate update is all it ever needed.
+        // Measurements in AUDIO_PIPELINE_PERFORMANCE.md.
+        if (telemetryEnabled_ && ++scansSinceTelemetry_ >= telemetryInterval_) {
+            scansSinceTelemetry_ = 0;
             KeyScanStats<NumKeys> telemetry;
             telemetry.isCalibrated = true;
             telemetry.calibrationCount = CALIBRATION_SCANS;
@@ -244,6 +371,24 @@ public:
     }
 
     /**
+     * @brief Emit a telemetry report only every Nth scan
+     *
+     * Telemetry is expensive enough to disturb audio rendering (see processScan),
+     * so it is deliberately decoupled from the scan rate. 1 restores the old
+     * every-scan behaviour and should only be used when nothing is playing.
+     *
+     * @param scans Scans between reports; 0 and 1 both mean every scan
+     */
+    void setTelemetryInterval(uint16_t scans) {
+        telemetryInterval_ = scans ? scans : 1;
+        scansSinceTelemetry_ = 0;
+    }
+
+    uint16_t getTelemetryInterval() const {
+        return telemetryInterval_;
+    }
+
+    /**
      * @brief Set the pressure ratio at which aftertouch begins
      *
      * Below this ratio the key produces no aftertouch (output stays 0).
@@ -281,6 +426,10 @@ private:
     
     // Telemetry
     bool telemetryEnabled_;
+    // Reports are throttled to one per telemetryInterval_ scans; see processScan
+    // for why this must not run at the scan rate.
+    uint16_t telemetryInterval_ = DEFAULT_TELEMETRY_INTERVAL;
+    uint16_t scansSinceTelemetry_ = 0;
 
     // Runtime-tunable aftertouch input range (set from the control panel)
     float aftertouchMinRatio_ = DEFAULT_AFTERTOUCH_MIN_RATIO;

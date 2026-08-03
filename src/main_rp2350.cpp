@@ -19,6 +19,7 @@
 #include <rp2350_audio_sink.hpp>
 #include <rp2350_telemetry_sink.hpp>
 #include <rp2350_timing_policy.hpp>
+#include <rp2350_cycle_counter.hpp>
 #include <embedded_program_storage.hpp>
 
 // Synth modules
@@ -58,6 +59,40 @@ static constexpr float MASTER_VOLUME = 0.05f;  // Master volume scaling factor (
 
 static constexpr bool ENABLE_AUDIO_TIMING_TELEMETRY = false;  // Set to true to enable timing telemetry output (adds overhead)
 
+// Per-buffer cycle profiling. Unlike ENABLE_AUDIO_TIMING_TELEMETRY, this reads
+// the cycle counter exactly twice per buffer rather than twice per span per
+// sample, so it costs a few dozen cycles out of ~1.6 million and can be left on.
+// It reports what actually matters for glitch-free audio: the *worst* render
+// time seen, and how many buffers missed the deadline.
+static constexpr bool ENABLE_CYCLE_PROFILE = true;
+
+// By default the render profile is reported only when a buffer actually missed
+// its deadline, because a periodic report is itself a printf on core 0 - exactly
+// the thing that was starving the audio core in the first place. Profiling runs
+// need the steady stream, so tools that graph it build with a heartbeat.
+#ifdef PROFILE_RENDER_HEARTBEAT
+static constexpr bool RENDER_PROFILE_HEARTBEAT = true;
+#else
+static constexpr bool RENDER_PROFILE_HEARTBEAT = false;
+#endif
+
+// Buffers per render-profile window (~256/48000 s each, so 500 is ~2.7 s).
+static constexpr uint32_t RENDER_PROFILE_INTERVAL = 500;
+
+// Diagnostic switches for bisecting what steals time from the audio core. Both
+// change behaviour, so they are only for profiling runs, never for a real build.
+// Define via build_flags, e.g. -DPROFILE_NO_KEY_TELEMETRY.
+#ifdef PROFILE_NO_KEY_TELEMETRY
+static constexpr bool PROFILE_KEY_TELEMETRY = false;   // silence the per-scan JSON
+#else
+static constexpr bool PROFILE_KEY_TELEMETRY = true;
+#endif
+#ifdef PROFILE_PARK_CORE0
+static constexpr bool PROFILE_SCAN_KEYS = false;       // stop scanning the keyboard
+#else
+static constexpr bool PROFILE_SCAN_KEYS = true;
+#endif
+
 // Type aliases
 using Scanner = rp2350::PioCapacitiveScanner<FIRST_KEY_PIN, NUM_KEYS>;
 using AudioSink = rp2350::Rp2350AudioSink<BUFFER_SIZE>;
@@ -84,6 +119,34 @@ static volatile bool timingStatsReady = false;
 static AudioTimingStats sharedTimingStats;
 
 /**
+ * @brief Per-buffer render cost, in core cycles
+ *
+ * The audio path is double-buffered, so rendering a buffer must finish inside one
+ * buffer period or the DMA runs dry and the I2S output audibly glitches. Averages
+ * hide that: a mean of 60% with occasional 110% spikes still clicks. So this
+ * tracks the maximum and counts the buffers that were late.
+ *
+ * "Late" is detected two ways, which should agree: render cycles exceeding the
+ * budget, and the DMA already having finished by the time we come back to swap
+ * (i.e. we never actually had to wait).
+ */
+struct RenderProfile {
+    uint32_t renderMin = 0xFFFFFFFFu;
+    uint32_t renderMax = 0;
+    uint64_t renderTotal = 0;
+    uint32_t waitMin = 0xFFFFFFFFu;
+    uint32_t buffers = 0;
+    uint32_t overBudget = 0;   // render cycles > one buffer period
+    uint32_t noWait = 0;       // DMA was already done: the output starved
+
+    void reset() { *this = RenderProfile(); }
+};
+
+static volatile bool renderProfileReady = false;
+static RenderProfile sharedRenderProfile;
+static uint32_t deadlineCycles = 1;  // set in main() once the clock is known
+
+/**
  * @brief Generate audio samples from all synth voices into the buffer
  */
 void generateAudio(int32_t* buffer, size_t length, AudioTimer& timer) {
@@ -105,12 +168,23 @@ void generateAudio(int32_t* buffer, size_t length, AudioTimer& timer) {
 /**
  * @brief Audio generation loop (runs on core 1)
  *
- * Uses triple-buffering approach: while buffer A is being transmitted via DMA,
- * we fill buffer B. When DMA completes, we immediately swap to buffer B
- * (which is already filled) and start filling buffer A for the next swap.
+ * Double buffered: while buffer A is being transmitted via DMA we fill buffer B.
+ * When the DMA completes we swap to B (already filled) and start filling A.
+ *
+ * Two buffers means there is no slack at all - a render that overruns its buffer
+ * period starves the PIO FIFO and is audible immediately, which is why this loop
+ * tracks its worst case rather than its average. A third buffer would absorb
+ * spikes at the cost of another buffer period of output latency; see
+ * AUDIO_PIPELINE_PERFORMANCE.md for why that trade wasn't taken.
  */
 void core1_audio_loop() {
     printf("Core 1: audio loop started\n");
+
+    // Each core has its own DWT, so the cycle counter has to be enabled here as
+    // well as on core 0 - enabling it on core 0 alone leaves core 1's reading 0.
+    if constexpr (ENABLE_CYCLE_PROFILE) {
+        rp2350::CycleCounter::enable();
+    }
 
     // Timer for performance measurement
     AudioTimer timer;
@@ -119,21 +193,52 @@ void core1_audio_loop() {
     // Pre-fill the inactive buffer so it's ready when the first DMA completes
     generateAudio(audioSink->getInactiveBuffer(), BUFFER_SIZE, timer);
 
+    RenderProfile profile;
+
     while (true) {
         // Start measuring wait time for the next audio frame request
         timer.nextSpan("main:wait_for_dma");
-        
+
         // Wait for the current DMA transfer to complete
+        uint32_t waitStart = ENABLE_CYCLE_PROFILE ? rp2350::CycleCounter::now() : 0;
+        bool hadToWait = false;
         while (!audioSink->isTransferComplete()) {
+            hadToWait = true;
             tight_loop_contents();
         }
 
         // Immediately swap to the pre-filled buffer and start DMA
         audioSink->swapBuffers();
-        
+
+        uint32_t renderStart = 0;
+        if constexpr (ENABLE_CYCLE_PROFILE) {
+            renderStart = rp2350::CycleCounter::now();
+            uint32_t waited = renderStart - waitStart;
+            if (waited < profile.waitMin) profile.waitMin = waited;
+            // Never waiting means the previous render overran and the DMA had
+            // already drained the buffer before we got here.
+            if (!hadToWait) ++profile.noWait;
+        }
+
         // Now fill the new inactive buffer while DMA runs on the other one
         generateAudio(audioSink->getInactiveBuffer(), BUFFER_SIZE, timer);
-        
+
+        if constexpr (ENABLE_CYCLE_PROFILE) {
+            uint32_t spent = rp2350::CycleCounter::now() - renderStart;
+            if (spent < profile.renderMin) profile.renderMin = spent;
+            if (spent > profile.renderMax) profile.renderMax = spent;
+            profile.renderTotal += spent;
+            ++profile.buffers;
+            if (spent > deadlineCycles) ++profile.overBudget;
+
+            if (profile.buffers >= RENDER_PROFILE_INTERVAL && !renderProfileReady) {
+                sharedRenderProfile = profile;
+                __sync_synchronize();
+                renderProfileReady = true;
+                profile.reset();
+            }
+        }
+
         // Periodically signal core 0 to emit timing telemetry
         // (Don't do printf/JSON from core 1 - causes crashes)
         if (++frameCount >= TIMING_TELEMETRY_INTERVAL) {
@@ -171,6 +276,16 @@ int main() {
     printf("   Pressence Synth - RP2350B Platform  \n");
     printf("========================================\n");
     printf("CPU: RP2350 Cortex-M33 @ %lu MHz\n\n", clock_get_hz(clk_sys) / 1000000);
+
+    if constexpr (ENABLE_CYCLE_PROFILE) {
+        deadlineCycles = (uint32_t)((uint64_t)clock_get_hz(clk_sys) * BUFFER_SIZE / SAMPLE_RATE);
+        if (!rp2350::CycleCounter::enable()) {
+            printf("WARNING: DWT cycle counter unavailable; render profiling disabled\n");
+        } else {
+            printf("Render profiling on: budget %lu cycles per %u-frame buffer\n",
+                   (unsigned long)deadlineCycles, (unsigned)BUFFER_SIZE);
+        }
+    }
     
     // Create synth application (handles voices, MIDI processing, audio rendering)
     printf("Initializing %d-voice polyphonic synthesizer...\n", NUM_VOICES);
@@ -240,7 +355,7 @@ int main() {
         []() { return keyboard ? keyboard->getAftertouchMaxRatio() : 0.0f; });
     
     // Enable telemetry output
-    keyboard->setTelemetryEnabled(true);
+    keyboard->setTelemetryEnabled(PROFILE_KEY_TELEMETRY);
     printf("Keyboard controller initialized\n");
     printf("Calibrating... (this takes a few seconds)\n\n");
 
@@ -261,6 +376,31 @@ int main() {
     
     // Core 0 runs the key scan loop
     while (true) {
+        // Report per-buffer render cost. Percentages are printed as integers
+        // scaled by 10 because this SDK build's printf has no %f support.
+        if (ENABLE_CYCLE_PROFILE && renderProfileReady) {
+            __sync_synchronize();
+            RenderProfile p = sharedRenderProfile;
+            renderProfileReady = false;
+            if (p.buffers && (RENDER_PROFILE_HEARTBEAT || p.overBudget || p.noWait)) {
+                uint32_t avg = (uint32_t)(p.renderTotal / p.buffers);
+                printf("{\"type\":\"render\",\"buffers\":%lu,"
+                       "\"minPct10\":%lu,\"avgPct10\":%lu,\"maxPct10\":%lu,"
+                       "\"minCycles\":%lu,\"avgCycles\":%lu,\"maxCycles\":%lu,"
+                       "\"waitMinCycles\":%lu,\"overBudget\":%lu,\"starved\":%lu}\n",
+                       (unsigned long)p.buffers,
+                       (unsigned long)((uint64_t)p.renderMin * 1000 / deadlineCycles),
+                       (unsigned long)((uint64_t)avg * 1000 / deadlineCycles),
+                       (unsigned long)((uint64_t)p.renderMax * 1000 / deadlineCycles),
+                       (unsigned long)p.renderMin,
+                       (unsigned long)avg,
+                       (unsigned long)p.renderMax,
+                       (unsigned long)(p.waitMin == 0xFFFFFFFFu ? 0 : p.waitMin),
+                       (unsigned long)p.overBudget,
+                       (unsigned long)p.noWait);
+            }
+        }
+
         // Check if core 1 has timing stats ready to emit
         if (timingStatsReady) {
             __sync_synchronize();  // Memory barrier to ensure we see the written data
@@ -280,6 +420,13 @@ int main() {
         // line cycle and average, so 60 Hz hum (and its harmonics) integrate
         // to zero instead of beating down into the aftertouch band. The loop
         // now runs at ~MAINS_FREQUENCY_HZ; no extra sleep is needed.
+        if constexpr (!PROFILE_SCAN_KEYS) {
+            // Profiling only: leave core 0 idle so its scanning and DMA traffic
+            // can be ruled in or out as a source of jitter on the audio core.
+            sleep_ms(10);
+            continue;
+        }
+
         uint32_t readingSums[NUM_KEYS] = {0};
         uint32_t sampleCount = 0;
         absolute_time_t windowEnd = make_timeout_time_us(MAINS_AVERAGE_WINDOW_US);

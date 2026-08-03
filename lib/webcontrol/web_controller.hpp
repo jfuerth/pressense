@@ -22,6 +22,15 @@ namespace webcontrol {
 using SetBaseNoteCallback = std::function<void(uint8_t note)>;
 
 /**
+ * @brief Feeds a raw MIDI byte into the synth's MIDI stream
+ *
+ * Lets a host drive the synth without the physical keyboard - to audition a
+ * patch from the control panel, or to hold a known number of voices while
+ * profiling the render loop.
+ */
+using MidiByteCallback = std::function<void(uint8_t byte)>;
+
+/**
  * @brief Type aliases for voice iteration (same pattern as ProgramStorage)
  */
 using VoiceVisitor = std::function<void(synth::Voice&)>;
@@ -105,7 +114,11 @@ public:
                 
             case CommandType::SET_BASE_NOTE:
                 return handleSetBaseNote(j);
-                
+
+            case CommandType::MIDI:
+                return handleMidi(j);
+
+
             case CommandType::UNKNOWN:
             default:
                 sendError("unknown command: " + cmdStr);
@@ -154,6 +167,13 @@ public:
     /**
      * @brief Set callback for base note changes
      */
+    /**
+     * @brief Set the sink for raw MIDI bytes injected via the "midi" command
+     */
+    void setMidiByteCallback(MidiByteCallback callback) {
+        onMidiByte_ = std::move(callback);
+    }
+
     void setBaseNoteCallback(SetBaseNoteCallback callback) {
         onSetBaseNote_ = std::move(callback);
     }
@@ -224,7 +244,39 @@ private:
         sendAck("setBaseNote");
         return true;
     }
-    
+
+    /**
+     * @brief Inject raw MIDI bytes into the synth's MIDI stream
+     *
+     * The bytes are fed through the normal StreamProcessor, so running status,
+     * note on/off, aftertouch and CC all behave exactly as they do coming from
+     * the physical keyboard.
+     */
+    bool handleMidi(const nlohmann::json& j) {
+        if (!j.contains("bytes") || !j["bytes"].is_array()) {
+            sendError("midi: expected a 'bytes' array");
+            return false;
+        }
+        if (!onMidiByte_) {
+            sendError("midi: no MIDI sink wired up on this platform");
+            return false;
+        }
+        for (const auto& b : j["bytes"]) {
+            if (!b.is_number_unsigned()) {
+                sendError("midi: 'bytes' must contain unsigned integers");
+                return false;
+            }
+            unsigned value = b.get<unsigned>();
+            if (value > 255) {
+                sendError("midi: byte out of range");
+                return false;
+            }
+            onMidiByte_(static_cast<uint8_t>(value));
+        }
+        sendAck("midi");
+        return true;
+    }
+
     /**
      * @brief Set a synth parameter by name
      */
@@ -439,6 +491,7 @@ private:
     VoiceIterator voiceIterator_;
     features::ProgramStorage* programStorage_;
     SetBaseNoteCallback onSetBaseNote_;
+    MidiByteCallback onMidiByte_;
 
     // Registry of params that live outside the synth voices
     struct ExternalParam {

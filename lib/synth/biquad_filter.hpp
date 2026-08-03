@@ -16,6 +16,13 @@ namespace synth {
  */
 class BiquadFilter {
 public:
+#ifdef BIQUAD_PROFILE_UPDATES
+    // Counts actual coefficient recomputes, so a profiling build can tell how
+    // often the change thresholds above really fire. Not compiled into normal
+    // builds; see src/main_rp2350_bench.cpp.
+    static inline uint32_t updateCount = 0;
+#endif
+
     enum class Mode {
         LOWPASS,
         HIGHPASS,
@@ -33,6 +40,7 @@ public:
         : sampleRate_(sampleRate) {
         reset();
         updateCoefficients();
+        updateNoRecalcBand();
     }
     
     /**
@@ -58,22 +66,33 @@ public:
      * remaining perceptually transparent (threshold is well below JND).
      */
     inline void setCutoff(float frequencyHz) {
+        // Fast reject. This is called once per sample per voice and almost always
+        // decides to do nothing: measured on hardware, an actual recompute happens
+        // for 11 of 256 samples during a filter envelope's attack/decay and 0 of
+        // 256 at sustain. The band below is precomputed whenever the coefficients
+        // change, so the overwhelmingly common no-op path is two compares instead
+        // of a clamp, a fabsf and a divide (50 cycles -> ~4).
+        if (frequencyHz >= noRecalcLo_ && frequencyHz <= noRecalcHi_) {
+            return;
+        }
+
         // Clamp to valid range
         float nyquist = sampleRate_ * 0.5f;
         if (frequencyHz < 20.0f) frequencyHz = 20.0f;
         if (frequencyHz > nyquist * 0.99f) frequencyHz = nyquist * 0.99f;
-        
+
         // Only recalculate coefficients if change is significant
         // This avoids expensive trig calculations on every envelope step
         float absDelta = fabsf(frequencyHz - cutoffHz_);
         float relDelta = absDelta / cutoffHz_;
-        
+
         // Recalculate if: >3% relative change OR >20Hz absolute change
         // 3% is still below the Just Noticeable Difference for filter cutoff (~5%)
         // This aggressive threshold dramatically reduces CPU load with envelope modulation
         if (relDelta > 0.03f || absDelta > 20.0f) {
             cutoffHz_ = frequencyHz;
             updateCoefficients();
+            updateNoRecalcBand();
         }
     }
     
@@ -138,8 +157,11 @@ private:
      * Called immediately when parameters change (eager evaluation).
      */
     inline void updateCoefficients() {
+#ifdef BIQUAD_PROFILE_UPDATES
+        ++updateCount;
+#endif
         const float PI = 3.14159265358979323846f;
-        
+
         // Calculate normalized frequency (omega)
         float w0 = 2.0f * PI * cutoffHz_ / sampleRate_;
         float cosw0 = cosf(w0);   // Single-precision, hardware accelerated on ESP32
@@ -214,6 +236,20 @@ private:
         a2_ = a2 / a0;
     }
     
+    /**
+     * @brief Recompute the window of cutoffs that setCutoff() can ignore
+     *
+     * Mirrors the threshold test in setCutoff(): a request is insignificant when
+     * it is within 3% *and* within 20 Hz of the current cutoff, so the half-width
+     * is the smaller of the two.
+     */
+    inline void updateNoRecalcBand() {
+        float halfWidth = 0.03f * cutoffHz_;
+        if (halfWidth > 20.0f) halfWidth = 20.0f;
+        noRecalcLo_ = cutoffHz_ - halfWidth;
+        noRecalcHi_ = cutoffHz_ + halfWidth;
+    }
+
     // Sample rate
     float sampleRate_;
     
@@ -221,6 +257,11 @@ private:
     Mode mode_ = Mode::LOWPASS;
     float cutoffHz_ = 1000.0f;
     float q_ = 0.707f;  // Butterworth response
+
+    // Cutoff requests inside this band are too small to be worth recomputing
+    // coefficients for; kept in sync by updateNoRecalcBand().
+    float noRecalcLo_ = 1000.0f;
+    float noRecalcHi_ = 1000.0f;
     
     // Biquad coefficients (normalized)
     float b0_ = 1.0f, b1_ = 0.0f, b2_ = 0.0f;
