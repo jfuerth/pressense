@@ -53,6 +53,54 @@ def note_off(ser, note):
     ser.write(json.dumps({"cmd": "midi", "bytes": [0x80, note, 0]}).encode() + b"\n")
 
 
+def set_param(ser, name, value):
+    ser.write(json.dumps({"cmd": "setParam", "param": name, "value": value}).encode() + b"\n")
+
+
+# Every modulation destination engaged, plus audible vibrato and tremolo so both
+# LFOs actually run. This is the case that decides real headroom: optimisations
+# that only pay off on a static patch are worth nothing if turning the knobs up
+# drops polyphony.
+FULL_MODULATION = {
+    "vibratoDepth": 0.5, "tremoloDepth": 0.5,
+    "baseCutoff_atMod": 0.6, "filterQ_atMod": 0.4, "filterEnvAmount_atMod": 0.5,
+    "vibratoDepth_atMod": 0.5, "vibratoRate_atMod": 0.4,
+    "tremoloDepth_atMod": 0.5, "tremoloRate_atMod": 0.4,
+    "waveformShape_atMod": 0.5, "pitchBend_atMod": 2.0,
+}
+
+
+def apply_full_modulation(ser):
+    for name, value in FULL_MODULATION.items():
+        set_param(ser, name, value)
+    ser.flush()
+    time.sleep(0.5)
+
+
+def stream_aftertouch(ser, notes, seconds, rate_hz=60.0):
+    """Send polyphonic aftertouch for every held note, at the keyboard's rate.
+
+    All the notes for one cycle go in a single command so the device does one JSON
+    parse per cycle rather than one per note; the MIDI bytes that reach the synth
+    are identical either way. The real keyboard produces these internally, so this
+    still asks core 0 to do work it otherwise wouldn't - it is a pessimistic test.
+    """
+    period = 1.0 / rate_hz
+    end = time.time() + seconds
+    tick = 0
+    while time.time() < end:
+        payload = []
+        for note in notes:
+            # Keep the pressure moving so no change-detection cache in the voice
+            # can settle.
+            pressure = 20 + (tick * 37 + note * 11) % 100
+            payload += [0xA0, note, pressure]
+        if payload:
+            ser.write(json.dumps({"cmd": "midi", "bytes": payload}).encode() + b"\n")
+        tick += 1
+        time.sleep(period)
+
+
 def collect(ser, seconds):
     """Read render-profile records for a while and merge them."""
     worst = None
@@ -91,6 +139,8 @@ def main():
     ap.add_argument("env", nargs="?", default="prod_ram_2350b")
     ap.add_argument("--voices", default="0,1,2,4,6,8")
     ap.add_argument("--no-build", action="store_true")
+    ap.add_argument("--stress", action="store_true",
+                    help="engage every modulation destination and stream aftertouch")
     ap.add_argument("-o", "--output")
     args = ap.parse_args()
 
@@ -103,6 +153,9 @@ def main():
         time.sleep(3.0)          # firmware boot + calibration banner
         ser.reset_input_buffer()
 
+        if args.stress:
+            apply_full_modulation(ser)
+
         held = []
         for n in counts:
             # Adjust the set of held notes to exactly n.
@@ -113,9 +166,22 @@ def main():
                 note_on(ser, note)
                 held.append(note)
             ser.flush()
-            time.sleep(SETTLE_S)
-            ser.reset_input_buffer()
-            r = collect(ser, COLLECT_S)
+            if args.stress and held:
+                # Pressure has to be arriving *before* and *during* the window.
+                stream_aftertouch(ser, held, SETTLE_S)
+                ser.reset_input_buffer()
+                import threading
+                stop = threading.Event()
+                t = threading.Thread(target=stream_aftertouch,
+                                     args=(ser, held, COLLECT_S + 1.0), daemon=True)
+                t.start()
+                r = collect(ser, COLLECT_S)
+                stop.set()
+                t.join(timeout=2.0)
+            else:
+                time.sleep(SETTLE_S)
+                ser.reset_input_buffer()
+                r = collect(ser, COLLECT_S)
             if r is None:
                 print(f"{n:>2} voices: no data", file=sys.stderr)
                 continue

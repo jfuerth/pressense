@@ -1,6 +1,7 @@
 #pragma once
 
 #include <math.h>  // Use C math.h for single-precision cosf/sinf
+#include "fast_math.hpp"
 
 namespace synth {
 
@@ -160,12 +161,17 @@ private:
 #ifdef BIQUAD_PROFILE_UPDATES
         ++updateCount;
 #endif
-        const float PI = 3.14159265358979323846f;
-
-        // Calculate normalized frequency (omega)
-        float w0 = 2.0f * PI * cutoffHz_ / sampleRate_;
-        float cosw0 = cosf(w0);   // Single-precision, hardware accelerated on ESP32
-        float sinw0 = sinf(w0);   // Single-precision, hardware accelerated on ESP32
+        // Normalized frequency as a fraction of the sample rate, which is what the
+        // fast trig functions want: sin(w0) = sin(2*pi*normalized).
+        //
+        // cosf and sinf cost ~95 and ~82 cycles on the Cortex-M33, and this runs
+        // whenever a modulated cutoff or resonance moves far enough to matter - up
+        // to every sample when aftertouch is sweeping the filter. The
+        // approximations are within 2e-6, which is nowhere near enough to shift
+        // the filter's response audibly.
+        float normalized = cutoffHz_ / sampleRate_;
+        float cosw0 = fastCos2Pi(normalized);
+        float sinw0 = fastSin2Pi(normalized);
         float alpha = sinw0 / (2.0f * q_);
         
         // Coefficient calculation based on mode
@@ -228,12 +234,16 @@ private:
                 break;
         }
         
-        // Normalize by a0
-        b0_ = b0 / a0;
-        b1_ = b1 / a0;
-        b2_ = b2 / a0;
-        a1_ = a1 / a0;
-        a2_ = a2 / a0;
+        // Normalize by a0. One reciprocal and five multiplies rather than five
+        // divides: a float divide is ~13 cycles against ~1 for a multiply, and
+        // this runs on every coefficient update, which with a modulated cutoff can
+        // be most samples. a0 = 1 + alpha with alpha > 0, so it is never zero.
+        const float invA0 = 1.0f / a0;
+        b0_ = b0 * invA0;
+        b1_ = b1 * invA0;
+        b2_ = b2 * invA0;
+        a1_ = a1 * invA0;
+        a2_ = a2 * invA0;
     }
     
     /**

@@ -273,7 +273,11 @@ private:
             }
             onMidiByte_(static_cast<uint8_t>(value));
         }
-        sendAck("midi");
+        // Deliberately not acked. MIDI is a continuous data stream, not a control
+        // operation - aftertouch alone arrives tens of times a second - and
+        // printing a JSON acknowledgement for each one puts exactly the kind of
+        // periodic serialise-and-write burst on this core that
+        // AUDIO_PIPELINE_PERFORMANCE.md documents as starving the audio core.
         return true;
     }
 

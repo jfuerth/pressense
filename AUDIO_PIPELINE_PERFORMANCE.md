@@ -234,16 +234,114 @@ point, both cores doing their normal work with telemetry enabled:
 | 2 | 43.0% / 49.9% / **165.9%** | 4 | 17.1% / 17.4% / **29.2%** | **0** |
 | 4 | 72.3% / 99.8% / **204.5%** | 110 | 32.2% / 32.6% / **52.1%** | **0** |
 | 6 | 99.5% / 139.5% / **236.5%** | 400 | 47.3% / 47.8% / **67.1%** | **0** |
-| 8 | 129.9% / 179.2% / **267.1%** | 300 | 62.4% / 63.2% / **82.0%** | **0** |
+| 8 | 129.9% / 179.2% / **267.1%** | 300 | 63.3% / 63.8% / **72.5%** | **0** |
 
-All eight voices now fit, worst case, in 82% of the deadline, and no
-configuration starves the output. Per voice per sample: ~900 cycles → ~475.
-Silence went from 216,000 cycles per buffer to 32,000.
+And with every modulation destination engaged and pressure streaming to all held
+notes (`--stress`), which is the case that decides real headroom:
+
+| voices held | min / avg / **max** | starved |
+|---|---|---|
+| 1 | 11.3% / 11.8% / **22.4%** | 0 |
+| 4 | 39.8% / 40.7% / **49.6%** | 0 |
+| 6 | 58.5% / 60.0% / **72.1%** | 0 |
+| 8 | 77.9% / 79.5% / **93.0%** | 0 |
+
+All eight voices fit in 72.5% of the deadline on the default patch and 93% with
+everything modulated, and no configuration starves the output. Per voice per
+sample: ~900 cycles → ~475 unmodulated, ~625 fully modulated. Silence went from
+216,000 cycles per buffer to 45,000.
+
+Eight voices with everything turned up leaves only ~7% margin, so that is the
+practical polyphony ceiling for this DSP at 300 MHz; six leaves ~28%.
 
 The remaining 1.3× spread between min and max is the USB write for the telemetry
 line, which is contention rather than a fixed cost — it slows the render in
 proportion to how much work the render is doing. At 19% headroom it no longer
 threatens the deadline.
+
+## The modulated case, which is the one that matters
+
+The changes above are easy to fool yourself with, because most of them pay off
+when nothing is happening: silence, static parameters, zero-depth LFOs. A synth
+whose headroom evaporates the moment you turn the knobs up is no better than one
+that was slow all along. So the benchmark has a second half that engages *every*
+modulation destination, with audible vibrato and tremolo, and keeps pressure
+moving (`configureFullyModulated`, `--stress`).
+
+It was right to check. Before touching the transcendental functions:
+
+| 8 voices | % of deadline |
+|---|---|
+| default program | 57.4% |
+| **fully modulated, pressure at the keyboard's 60 Hz** | **99.9%** |
+| fully modulated, pressure changing every sample | 242.9% |
+
+Turning everything on cost 1.8× per voice (427 → 776 cycles) and consumed the
+entire margin. The reason is that modulation re-enables exactly the libm calls
+the earlier work had learned to skip: both LFO sines, the pitch exponential, and
+frequent biquad coefficient updates.
+
+Fixed by making those operations cheap rather than merely rare
+(`lib/synth/fast_math.hpp`, verified against libm in `test/test_fast_math/`):
+
+| | libm | approximation | accuracy |
+|---|---|---|---|
+| `Lfo::nextSample` at depth 0.5 | 100 cycles | **46** | 2e-6 on the sine |
+| pitch, per recompute | 450 (`powf`) | **~20** | < 0.01 cent |
+| `setCutoff` with recompute | 295 | **207** | 2e-6 on coefficients |
+| `setQ` with recompute | 263 | **207** | as above |
+| voice, fully modulated | 776 | **625** | |
+
+`setCutoff`/`setQ` also stopped doing five divides to normalise by a0, using one
+reciprocal and five multiplies instead.
+
+Where that leaves the fully modulated case:
+
+| 8 voices, all modulation on | before | after |
+|---|---|---|
+| clean DSP, pressure at 60 Hz | 99.9% | **72.8%** |
+| clean DSP, pressure every sample | 242.9% | **146.1%** |
+| end to end, pressure streamed over the control link | — | **93.0% max, 0 starved** |
+
+An honest caveat on that last row: `--stress` delivers aftertouch as `midi`
+commands over USB, which the real keyboard does not — it generates them
+internally. So the 93% includes ~15 points of inbound JSON parsing that real
+playing wouldn't pay. The clean DSP figure of 72.8% is the better predictor of
+real worst-case load.
+
+Finding that out was itself instructive: the stress test originally peaked at
+104% with 3 starved buffers, and it turned out `handleMidi` was printing a JSON
+acknowledgement for every injected message — 60 serialise-and-write bursts per
+second, the same pathology as the original keyboard telemetry, on the inbound
+path. Not acking a continuous data stream took the peak to 93% with none.
+
+## Was the wire format worth changing?
+
+Not any more, and this is worth recording because it is counter-intuitive.
+
+Once telemetry was throttled to 10 Hz and given the allocation-free serialiser,
+its contribution fell below the noise floor. Measured with the fully modulated
+stress case:
+
+| 8 voices, stressed | min / avg / **max** | starved |
+|---|---|---|
+| keyboard telemetry on | 77.9% / 79.5% / **102.2%** | 3 |
+| keyboard telemetry off entirely | 80.2% / 81.7% / **104.4%** | 5 |
+| core 0 parked completely | 76.1% / 77.8% / **104.1%** | 7 |
+
+Removing telemetry altogether — the theoretical ceiling for any cheaper encoding
+— changes nothing. All three rows are the same within run-to-run variation, and
+the remaining spread was the MIDI ack described above.
+
+A binary format would still shrink the payload (a 32-key report is ~1.4 kB of
+JSON; a packed struct of `uint16` readings, `uint16` baselines, a `uint32`
+note-state bitmask and `uint8` pressures is ~170 bytes, and `ratios` need not be
+sent at all since the browser can divide). But it would be optimising something
+that no longer costs anything measurable. If telemetry ever needs to go faster
+than ~10 Hz, revisit it then, and prefer a fixed little-endian struct over
+protobuf: the schema is static, the data is homogeneous arrays, both ends are
+little-endian, and a `DataView` needs no library where protobuf needs a compiler,
+a runtime and per-field tag decoding.
 
 ## Deliberately not done
 
@@ -267,7 +365,13 @@ corrected.
 - `Oscillator::nextSample` evaluates saw, triangle and square unconditionally and
   applies two PolyBLEP corrections, then multiplies two of the three by zero for
   any non-morphed waveform. 60 cycles, so worth ~25% of a voice.
-- Flush-to-zero on the FPU (`FPSCR.FZ`): filter tails decaying into denormals are
-  a classic source of unexplained cost. Unmeasured here.
-- `NUM_VOICES` could now plausibly go above 8; the ceiling is roughly 12 voices
-  at the measured ~475 cycles/sample/voice.
+- Flush-to-zero on the FPU (`FPSCR.FZ`): **tested, no effect.** Setting FZ changed
+  every figure by less than run-to-run noise, so denormals in decaying filter
+  tails cost nothing measurable on this FPU. Not worth revisiting.
+- The oscillator still evaluates saw, triangle and square unconditionally and
+  applies two PolyBLEP corrections, multiplying two of the three by zero for any
+  un-morphed waveform. 60 cycles, ~10% of a fully modulated voice.
+- `updateCoefficients` is the largest remaining single cost when the filter is
+  being swept (207 cycles). A topology with cheaper coefficient updates, or
+  interpolating between two coefficient sets, would help the heavily modulated
+  case specifically.

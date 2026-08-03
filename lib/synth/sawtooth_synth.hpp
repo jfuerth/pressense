@@ -7,6 +7,7 @@
 #include <lfo.hpp>
 #include <aftertouch_modulator.hpp>
 #include <performance_timer.hpp>
+#include <fast_math.hpp>
 #include <cmath>
 
 namespace synth {
@@ -418,19 +419,24 @@ public:
         float aftertouchBend = aftertouch_ * pitchBend_atMod_;
         float semitoneShift = pitchBend_ * pitchBendRange_ + vibratoMod + aftertouchBend;
 
-        // The exponential semitone->frequency mapping (std::pow) is the most
-        // expensive op in this loop. Pitch bend and aftertouch move at control
-        // rate and vibrato moves slowly, so recompute only when the combined
-        // shift (or the base note) actually changes. 0.01 semitone (~1 cent) is
-        // well below the ~5-cent pitch JND, so this is inaudible. This mirrors
-        // the change-threshold guard in BiquadFilter::setCutoff and keeps a
-        // held, unmodulated note from paying for std::pow every sample.
+        // The exponential semitone->frequency mapping is guarded two ways, because
+        // vibrato and aftertouch bend make it run constantly.
+        //
+        // First, semitonesToRatio uses a polynomial rather than powf, which costs
+        // 450 cycles here - 7% of the entire eight-voice budget for one call. It
+        // is accurate to well under a hundredth of a cent.
+        //
+        // Second, it is only recomputed when the combined shift (or the base note)
+        // actually moves. 0.01 semitone is well below the ~5-cent pitch JND, so
+        // this is inaudible, and it keeps a held, unmodulated note from paying
+        // anything at all. This mirrors the change-threshold guard in
+        // BiquadFilter::setCutoff.
         float shiftDelta = semitoneShift - lastSemitoneShift_;
         if (shiftDelta < 0.0f) shiftDelta = -shiftDelta;
         if (baseFrequency_ != cachedBaseFrequency_ || shiftDelta > 0.01f) {
             cachedBaseFrequency_ = baseFrequency_;
             lastSemitoneShift_ = semitoneShift;
-            cachedFrequency_ = baseFrequency_ * std::pow(2.0f, semitoneShift * (1.0f / 12.0f));
+            cachedFrequency_ = baseFrequency_ * semitonesToRatio(semitoneShift);
         }
         float frequency = cachedFrequency_;
         

@@ -179,6 +179,8 @@ public:
         : drive_(normalizedDrive),
           postFilter_(sampleRate),
           activeIndex_(0) {
+        setDrive(normalizedDrive);   // clamps and derives actualDrive_
+
         // Initialize post-filter as a low-pass at 10kHz with Q=0.707 (Butterworth)
         postFilter_.setMode(BiquadFilter::Mode::LOWPASS);
         postFilter_.setCutoff(10000.0f);
@@ -199,12 +201,10 @@ public:
      * Two-pass approach reduces virtual function call overhead.
      */
     void processBuffer(float* buffer, unsigned int numFrames) {
-        // Map normalized drive [0, 1] to exponential range [0.1, 10.0]
-        // 0.0 → 0.1x, 0.5 → 1.0x (unity), 1.0 → 10.0x
-        float actualDrive = 0.1f * std::pow(100.0f, drive_);
-        
-        // Pass 1: Apply clipping/waveshaping (one virtual call per buffer)
-        algorithms_[activeIndex_]->processBuffer(buffer, numFrames, actualDrive);
+        // Pass 1: Apply clipping/waveshaping (one virtual call per buffer).
+        // The drive curve is evaluated in setDrive() rather than here - it only
+        // changes when the knob moves, and std::pow costs 450 cycles.
+        algorithms_[activeIndex_]->processBuffer(buffer, numFrames, actualDrive_);
         
         // Pass 2: Apply post-filter
         for (unsigned int i = 0; i < numFrames; ++i) {
@@ -251,6 +251,9 @@ public:
         if (drive < 0.0f) drive = 0.0f;
         if (drive > 1.0f) drive = 1.0f;
         drive_ = drive;
+        // Map normalized drive [0, 1] to exponential range [0.1, 10.0]
+        // 0.0 -> 0.1x, 0.5 -> 1.0x (unity), 1.0 -> 10.0x
+        actualDrive_ = 0.1f * std::pow(100.0f, drive_);
     }
     
     /**
@@ -279,6 +282,7 @@ public:
     
 private:
     float drive_;  // Normalized drive [0.0, 1.0]
+    float actualDrive_;  // drive_ mapped through the exponential curve; see setDrive
     BiquadFilter postFilter_;  // Low-pass filter applied after clipping/shaping
     std::vector<std::unique_ptr<ClippingAlgorithm>> algorithms_;
     size_t activeIndex_;

@@ -416,6 +416,98 @@ static void renderVoiceMajor() {
     }
 }
 
+// Every modulation destination engaged, as a patch that actually uses what the
+// instrument is for would have it. This is the case that matters for headroom:
+// optimisations that only pay off in silence or with static parameters are worth
+// nothing if turning the knobs up drops polyphony.
+static void configureFullyModulated(synth::WavetableSynth& v) {
+    configureLikeDefaultProgram(v);
+    v.setVibratoDepth(0.5f);        // audible vibrato -> LFO sine runs
+    v.setTremoloDepth(0.5f);        // audible tremolo -> second LFO sine runs
+    v.setBaseCutoffAtMod(0.6f);
+    v.setFilterQAtMod(0.4f);
+    v.setFilterEnvAmountAtMod(0.5f);
+    v.setVibratoDepthAtMod(0.5f);
+    v.setVibratoRateAtMod(0.4f);
+    v.setTremoloDepthAtMod(0.5f);
+    v.setTremoloRateAtMod(0.4f);
+    v.setWaveformShapeAtMod(0.5f);
+    v.setPitchBendAtMod(2.0f);
+}
+
+// A pressure value that keeps moving, so none of the change-detection caches in
+// the voice can settle. Deterministic, and never repeats the same value twice in
+// a row.
+static inline float pressureAt(uint32_t tick) {
+    return 0.05f + 0.9f * (float)((tick * 37u) % 64u) / 64.0f;
+}
+
+/**
+ * @brief Render a buffer while aftertouch keeps arriving
+ *
+ * @param aftertouchPeriod Samples between pressure updates for each voice.
+ *        800 is the real keyboard's rate (it scans at the ~60 Hz mains
+ *        frequency); 1 is the pathological case where pressure changes on every
+ *        single sample.
+ */
+static void renderModulated(uint32_t aftertouchPeriod) {
+    static NoOpTimer timer;
+    static uint32_t tick = 0;
+    for (size_t f = 0; f < BUFFER_SIZE; ++f) g_mono[f] = 0.0f;
+    for (int v = 0; v < NUM_VOICES; ++v) {
+        synth::WavetableSynth& s = *g_voices[v];
+        if (!s.isActive()) continue;
+        for (size_t f = 0; f < BUFFER_SIZE; ++f) {
+            if ((f % aftertouchPeriod) == 0) {
+                s.setAftertouch(pressureAt(tick++));
+            }
+            g_mono[f] += s.nextSample(timer);
+        }
+    }
+}
+
+static void benchWorstCase() {
+    printf("== Fully modulated voices (per sample) ==\n");
+
+    static synth::WavetableSynth loud(SAMPLE_RATE);
+    static NoOpTimer timer;
+    configureFullyModulated(loud);
+    loud.trigger(220.0f, 1.0f);
+    loud.setAftertouch(0.7f);
+    for (int i = 0; i < 4800; ++i) (void)loud.nextSample(timer);
+    benchOp("all modulation, pressure held", 2000,
+            [](int) { g_sink = loud.nextSample(timer); });
+
+    static uint32_t tick = 0;
+    benchOp("all modulation, pressure at 60 Hz", 2000, [](int i) {
+        if ((i % 800) == 0) loud.setAftertouch(pressureAt(tick++));
+        g_sink = loud.nextSample(timer);
+    });
+    benchOp("all modulation, pressure every sample", 2000, [](int) {
+        loud.setAftertouch(pressureAt(tick++));
+        g_sink = loud.nextSample(timer);
+    });
+    printf("\n");
+
+    printf("== Whole buffer, all voices fully modulated ==\n");
+    for (int active : {1, 4, 8}) {
+        setupVoices(active);
+        for (int v = 0; v < NUM_VOICES; ++v) {
+            configureFullyModulated(*g_voices[v]);
+        }
+        // Re-trigger so the new modulation settings apply from a clean start.
+        for (int v = 0; v < active; ++v) g_voices[v]->trigger(110.0f * (1 + v), 1.0f);
+        for (int v = 0; v < active; ++v) g_voices[v]->setAftertouch(0.7f);
+
+        char label[72];
+        snprintf(label, sizeof(label), "%d voice(s), pressure at 60 Hz", active);
+        reportBuffer(label, measure(1, 5, [](int) { renderModulated(800); }));
+        snprintf(label, sizeof(label), "%d voice(s), pressure every sample", active);
+        reportBuffer(label, measure(1, 5, [](int) { renderModulated(1); }));
+    }
+    printf("\n");
+}
+
 static void benchPipeline() {
     printf("== Mixing loop structure (whole %u-frame buffer, 8 voices allocated) ==\n",
            (unsigned)BUFFER_SIZE);
@@ -537,6 +629,7 @@ int main() {
     benchPrimitives();
     benchComponents();
     benchVoice();
+    benchWorstCase();
     benchPipeline();
     benchInstrumentation();
 
