@@ -28,7 +28,8 @@ namespace synth {
  * Filter envelope modulates cutoff frequency relative to base cutoff (from timbre).
  * Filter envelope amount controls modulation depth.
  * Aftertouch can modulate waveform shape, filter cutoff, resonance, filter env
- * amount, vibrato rate/depth, tremolo rate/depth, and pitch bend.
+ * amount, filter env sustain, vibrato rate/depth, tremolo rate/depth, pitch bend,
+ * and voice level.
  *
  * Every aftertouch-modulatable parameter is owned by this class rather than by
  * the component it drives, because the component holds the *modulated* value
@@ -48,6 +49,11 @@ public:
     static constexpr float FILTER_Q_MAX = 20.0f;
     static constexpr float LFO_RATE_MIN = 0.1f;
     static constexpr float LFO_RATE_MAX = 20.0f;
+    // Voice level, applied before the shared clipper. Voices sum raw into it and
+    // there is no master volume afterwards, so this is the voice-side headroom
+    // control: eight voices at 1.0 already peak well into saturation.
+    static constexpr float LEVEL_MIN = 0.0f;
+    static constexpr float LEVEL_MAX = 1.0f;
 
     WavetableSynth(float sampleRate = 44100.0f)
         : sampleRate_(sampleRate),
@@ -64,7 +70,8 @@ public:
         // Initialize filter envelope with defaults
         filterEnvelope_.setAttackTime(0.005f);   // 5ms
         filterEnvelope_.setDecayTime(0.2f);      // 200ms
-        filterEnvelope_.setSustainLevel(0.3f);
+        setFilterEnvSustain(0.3f);               // via the baseline setter, so
+                                                 // the applied cache is seeded too
         filterEnvelope_.setReleaseTime(0.1f);    // 100ms
 
         // Seed the baseline caches from the components' own defaults, so the
@@ -86,6 +93,7 @@ public:
         // note's modulated shape/resonance/rates up to the moved() thresholds.
         setWaveformShape(waveformShape_);
         setFilterQ(filterQ_);
+        setFilterEnvSustain(filterEnvSustain_);
         setVibratoRate(vibratoRate_);
         setTremoloRate(tremoloRate_);
         vibratoLfo_.reset();
@@ -191,11 +199,52 @@ public:
     
     /**
      * @brief Get filter envelope for parameter control from CC callbacks
+     *
+     * Do not set the sustain level here; use setFilterEnvSustain() so the
+     * baseline survives aftertouch modulation. The times are fine to set
+     * directly.
      */
     AdsrEnvelope& getFilterEnvelope() {
         return filterEnvelope_;
     }
-    
+
+    /**
+     * @brief Set the base filter envelope sustain level (before aftertouch mod)
+     * @param level Sustain level [0.0, 1.0]
+     */
+    void setFilterEnvSustain(float level) {
+        if (level < 0.0f) level = 0.0f;
+        if (level > 1.0f) level = 1.0f;
+        filterEnvSustain_ = level;
+        appliedFilterEnvSustain_ = level;
+        filterEnvelope_.setSustainLevel(level);
+    }
+
+    /**
+     * @brief Get the base filter envelope sustain level (before aftertouch mod)
+     */
+    float getFilterEnvSustain() const { return filterEnvSustain_; }
+
+    /**
+     * @brief Set the voice level (VCA gain applied before the shared clipper)
+     * @param level Gain [LEVEL_MIN, LEVEL_MAX]
+     *
+     * Multiplies with note velocity and the amplitude envelope, and stacks with
+     * the output stage's drive: raising it pushes this voice further into
+     * saturation, lowering it buys headroom for polyphony.
+     */
+    void setLevel(float level) {
+        if (level < LEVEL_MIN) level = LEVEL_MIN;
+        if (level > LEVEL_MAX) level = LEVEL_MAX;
+        level_ = level;
+    }
+
+    /**
+     * @brief Get the voice level (before aftertouch modulation)
+     */
+    float getLevel() const { return level_; }
+
+
     /**
      * @brief Set filter envelope modulation amount
      * @param amount Modulation depth [0.0, 1.0]
@@ -335,7 +384,20 @@ public:
 
     void setFilterEnvAmountAtMod(float amount) { filterEnvAmount_atMod_ = amount; }
     float getFilterEnvAmountAtMod() const { return filterEnvAmount_atMod_; }
-    
+
+    // Additive over the sustain level's own [0, 1] span. Distinct from
+    // filterEnvAmount_atMod_, which scales the whole envelope including the
+    // attack peak: this moves only the level the envelope holds at, so pressure
+    // sustains the brightness without changing the initial bite.
+    void setFilterEnvSustainAtMod(float amount) { filterEnvSustain_atMod_ = amount; }
+    float getFilterEnvSustainAtMod() const { return filterEnvSustain_atMod_; }
+
+    // Additive over the level's own [0, 1] span, so a voice sitting at level 0
+    // can still be brought up by pressure (a multiplicative law could not).
+    void setLevelAtMod(float amount) { level_atMod_ = amount; }
+    float getLevelAtMod() const { return level_atMod_; }
+
+
     void setVibratoDepthAtMod(float amount) { vibratoDepth_atMod_ = amount; }
     float getVibratoDepthAtMod() const { return vibratoDepth_atMod_; }
     
@@ -384,6 +446,10 @@ public:
             aftertouch_ * vibratoRate_atMod_ * (LFO_RATE_MAX - LFO_RATE_MIN);
         float effectiveTremoloRate = tremoloRate_ +
             aftertouch_ * tremoloRate_atMod_ * (LFO_RATE_MAX - LFO_RATE_MIN);
+        // Sustain level and voice level both span 1.0, so they need no factor.
+        float effectiveFilterEnvSustain = filterEnvSustain_ +
+            aftertouch_ * filterEnvSustain_atMod_;
+        float effectiveLevel = level_ + aftertouch_ * level_atMod_;
 
         // Clamp values to valid ranges
         if (effectiveCutoff < 20.0f) effectiveCutoff = 20.0f;
@@ -401,6 +467,10 @@ public:
         if (effectiveVibratoRate > LFO_RATE_MAX) effectiveVibratoRate = LFO_RATE_MAX;
         if (effectiveTremoloRate < LFO_RATE_MIN) effectiveTremoloRate = LFO_RATE_MIN;
         if (effectiveTremoloRate > LFO_RATE_MAX) effectiveTremoloRate = LFO_RATE_MAX;
+        if (effectiveFilterEnvSustain < 0.0f) effectiveFilterEnvSustain = 0.0f;
+        if (effectiveFilterEnvSustain > 1.0f) effectiveFilterEnvSustain = 1.0f;
+        if (effectiveLevel < LEVEL_MIN) effectiveLevel = LEVEL_MIN;
+        if (effectiveLevel > LEVEL_MAX) effectiveLevel = LEVEL_MAX;
 
         // Calculate vibrato (pitch modulation). setRate() costs a divide, so it
         // is only re-applied when the rate has actually moved (see moved()).
@@ -449,8 +519,21 @@ public:
         }
         float sample = oscillator_.nextSample(frequency);
 
-        // Calculate filter cutoff with envelope modulation
+        // Calculate filter cutoff with envelope modulation.
+        //
+        // setSustainLevel() is a bare store - unlike the ADSR times, it does not
+        // recompute the per-sample rates - so this is the cheapest modulation
+        // destination in the voice. Two consequences of that, both deliberate:
+        // the decay slope and release rate stay as the last time setting derived
+        // them (AdsrEnvelope::updateRates divides by sustain), and an upward move
+        // while the envelope is still decaying snaps the level to the new sustain
+        // in one sample. Both are inaudible on a cutoff; neither would be on a
+        // VCA, which is why voice level below is a plain gain instead.
         timer.nextSpan("synth:filter_env");
+        if (moved(effectiveFilterEnvSustain, appliedFilterEnvSustain_, 0.002f)) {
+            appliedFilterEnvSustain_ = effectiveFilterEnvSustain;
+            filterEnvelope_.setSustainLevel(effectiveFilterEnvSustain);
+        }
         float filterEnvLevel = filterEnvelope_.nextSample();
         float envModulation = filterEnvLevel * effectiveFilterEnvAmount;
         
@@ -481,10 +564,13 @@ public:
         float tremoloMod = tremoloLfo_.nextSample();  // Returns [-depth, +depth]
         float tremoloMultiplier = 1.0f + tremoloMod;  // Range: [1-depth, 1+depth]
         
-        // Apply amplitude envelope, volume, and tremolo
+        // Apply amplitude envelope, note velocity, voice level, and tremolo.
+        // Voice level is a plain gain rather than a push into the amp envelope's
+        // sustain, so pressure moves the amplitude in every phase - attack and
+        // release included - with no discontinuity to click on.
         timer.nextSpan("synth:amp_env");
         float ampEnvLevel = ampEnvelope_.nextSample();
-        sample *= ampEnvLevel * volume_ * tremoloMultiplier;
+        sample *= ampEnvLevel * volume_ * effectiveLevel * tremoloMultiplier;
         
         return sample;
     }
@@ -531,8 +617,15 @@ private:
     // Seeded from the components' defaults by the constructor.
     float waveformShape_ = 0.0f;
     float filterQ_ = 0.707f;
+    float filterEnvSustain_ = 0.3f;
     float vibratoRate_ = 5.0f;      // Hz
     float tremoloRate_ = 5.0f;      // Hz
+
+    // Voice gain, applied in the final multiply rather than pushed into a
+    // component, so it needs no applied-value cache. Mirrors ProgramData::level's
+    // default, which is what a voice runs at before any program is loaded - the
+    // firmware does not load one at boot.
+    float level_ = 0.5f;
 
     // Per-voice aftertouch
     float aftertouch_ = 0.0f;       // Normalized [0, 1]
@@ -546,12 +639,15 @@ private:
     float filterQ_atMod_ = 0.0f;
     float vibratoRate_atMod_ = 0.0f;
     float tremoloRate_atMod_ = 0.0f;
+    float filterEnvSustain_atMod_ = 0.0f;
+    float level_atMod_ = 0.0f;
     float pitchBend_atMod_ = 0.0f;  // Semitones [-12, +12] (not a [-1,1] scaler)
 
     // Last value pushed into each sub-component, so nextSample() can skip
     // re-applying an unchanged one. Kept in sync by the baseline setters.
     float appliedWaveformShape_ = 0.0f;
     float appliedFilterQ_ = 0.707f;
+    float appliedFilterEnvSustain_ = 0.3f;
     float appliedVibratoRate_ = 5.0f;
     float appliedTremoloRate_ = 5.0f;
 

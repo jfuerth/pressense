@@ -20,7 +20,8 @@ High-level architecture, from input side to output side:
   * Reusable biquad filter, composable with envelope generator
   * Reusable ADSR envelope generator
   * Reusable LFO (vibrato and tremolo)
-  * Aftertouch modulation of every continuous timbre parameter, interpolated by pressure: waveform shape, filter cutoff, resonance, filter envelope amount, vibrato rate/depth, tremolo rate/depth, and pitch bend (up to ±12 semitones)
+  * Aftertouch modulation of every continuous timbre parameter, interpolated by pressure: waveform shape, filter cutoff, resonance, filter envelope amount and sustain, vibrato rate/depth, tremolo rate/depth, voice level, and pitch bend (up to ±12 semitones)
+  * Per-voice level sits ahead of the shared clipper, so it doubles as the headroom control for polyphony
   * Voice mixing with various clipping/distortion algorithms
   * There's room to implement other types of synth engines without worrying about note-to-voice allocation, mixdown, etc.
   * Future idea: could implement a tracker module that ignores the voice allocator and drives voices directly (one voice per track)

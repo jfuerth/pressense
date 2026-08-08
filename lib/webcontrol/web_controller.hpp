@@ -311,7 +311,7 @@ private:
             forEachWavetableSynth([value](synth::WavetableSynth& v) { v.getFilterEnvelope().setDecayTime(value); });
         }
         else if (param == "filterEnvSustain") {
-            forEachWavetableSynth([value](synth::WavetableSynth& v) { v.getFilterEnvelope().setSustainLevel(value); });
+            forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setFilterEnvSustain(value); });
         }
         else if (param == "filterEnvRelease") {
             forEachWavetableSynth([value](synth::WavetableSynth& v) { v.getFilterEnvelope().setReleaseTime(value); });
@@ -343,6 +343,10 @@ private:
         else if (param == "tremoloDepth") {
             forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setTremoloDepth(value); });
         }
+        // Voice level
+        else if (param == "level") {
+            forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setLevel(value); });
+        }
         // Aftertouch modulation
         else if (param == "baseCutoff_atMod") {
             forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setBaseCutoffAtMod(value); });
@@ -367,6 +371,12 @@ private:
         }
         else if (param == "tremoloRate_atMod") {
             forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setTremoloRateAtMod(value); });
+        }
+        else if (param == "filterEnvSustain_atMod") {
+            forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setFilterEnvSustainAtMod(value); });
+        }
+        else if (param == "level_atMod") {
+            forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setLevelAtMod(value); });
         }
         else if (param == "pitchBend_atMod") {
             forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setPitchBendAtMod(value); });
@@ -406,7 +416,7 @@ private:
                 params.filterEnvAmount = v.getFilterEnvelopeAmount();
                 params.filterEnvAttack = v.getFilterEnvelope().getAttackTime();
                 params.filterEnvDecay = v.getFilterEnvelope().getDecayTime();
-                params.filterEnvSustain = v.getFilterEnvelope().getSustainLevel();
+                params.filterEnvSustain = v.getFilterEnvSustain();
                 params.filterEnvRelease = v.getFilterEnvelope().getReleaseTime();
                 params.ampEnvAttack = v.getAmpEnvelope().getAttackTime();
                 params.ampEnvDecay = v.getAmpEnvelope().getDecayTime();
@@ -416,6 +426,7 @@ private:
                 params.vibratoDepth = v.getVibratoDepth();
                 params.tremoloRate = v.getTremoloRate();
                 params.tremoloDepth = v.getTremoloDepth();
+                params.level = v.getLevel();
                 params.baseCutoff_atMod = v.getBaseCutoffAtMod();
                 params.filterEnvAmount_atMod = v.getFilterEnvAmountAtMod();
                 params.vibratoDepth_atMod = v.getVibratoDepthAtMod();
@@ -424,6 +435,8 @@ private:
                 params.filterQ_atMod = v.getFilterQAtMod();
                 params.vibratoRate_atMod = v.getVibratoRateAtMod();
                 params.tremoloRate_atMod = v.getTremoloRateAtMod();
+                params.filterEnvSustain_atMod = v.getFilterEnvSustainAtMod();
+                params.level_atMod = v.getLevelAtMod();
                 params.pitchBend_atMod = v.getPitchBendAtMod();
                 captured = true;
             }

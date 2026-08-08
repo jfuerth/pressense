@@ -89,7 +89,10 @@ struct ParamsTelemetry {
     // Tremolo
     float tremoloRate;
     float tremoloDepth;
-    
+
+    // Voice level (VCA gain, pre-clipper)
+    float level;
+
     // Aftertouch modulation
     float baseCutoff_atMod;
     float filterEnvAmount_atMod;
@@ -99,6 +102,8 @@ struct ParamsTelemetry {
     float filterQ_atMod;
     float vibratoRate_atMod;
     float tremoloRate_atMod;
+    float filterEnvSustain_atMod;
+    float level_atMod;
     float pitchBend_atMod;
 };
 
@@ -122,6 +127,7 @@ inline void to_json(nlohmann::json& j, const ParamsTelemetry& p) {
         {"vibratoDepth", p.vibratoDepth},
         {"tremoloRate", p.tremoloRate},
         {"tremoloDepth", p.tremoloDepth},
+        {"level", p.level},
         {"baseCutoff_atMod", p.baseCutoff_atMod},
         {"filterEnvAmount_atMod", p.filterEnvAmount_atMod},
         {"vibratoDepth_atMod", p.vibratoDepth_atMod},
@@ -130,6 +136,8 @@ inline void to_json(nlohmann::json& j, const ParamsTelemetry& p) {
         {"filterQ_atMod", p.filterQ_atMod},
         {"vibratoRate_atMod", p.vibratoRate_atMod},
         {"tremoloRate_atMod", p.tremoloRate_atMod},
+        {"filterEnvSustain_atMod", p.filterEnvSustain_atMod},
+        {"level_atMod", p.level_atMod},
         {"pitchBend_atMod", p.pitchBend_atMod}
     };
 }

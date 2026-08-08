@@ -250,7 +250,7 @@ private:
                 break;
             case 25: // Filter envelope sustain level
                 voicePool_->forEachVoice([normalized](synth::WavetableSynth& voice) {
-                    voice.getFilterEnvelope().setSustainLevel(normalized);
+                    voice.setFilterEnvSustain(normalized);
                 });
                 break;
             case 73: // Filter envelope release (10ms - 5s)

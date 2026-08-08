@@ -54,7 +54,12 @@ struct ProgramData {
     // Tremolo (amplitude modulation)
     float tremoloRate = 5.0f;    // Hz
     float tremoloDepth = 0.0f;   // 0-1 (0 = off)
-    
+
+    // Voice level (VCA gain before the shared clipper; 1.0 = unity). Defaults to
+    // half unity to leave headroom: voices sum raw into the clipper, so eight at
+    // unity peak well into saturation.
+    float level = 0.5f;
+
     // Aftertouch modulation amounts [-1.0, 1.0]
     // 0 = no effect, positive = increase with pressure, negative = decrease
     float baseCutoff_atMod = 0.0f;
@@ -65,6 +70,8 @@ struct ProgramData {
     float filterQ_atMod = 0.0f;
     float vibratoRate_atMod = 0.0f;
     float tremoloRate_atMod = 0.0f;
+    float filterEnvSustain_atMod = 0.0f;
+    float level_atMod = 0.0f;
     float pitchBend_atMod = 0.0f;  // Semitones [-12, +12] bent at full aftertouch
     
     /**
@@ -83,7 +90,7 @@ struct ProgramData {
                 filterEnvAmount = ws.getFilterEnvelopeAmount();
                 filterEnvAttack = ws.getFilterEnvelope().getAttackTime();
                 filterEnvDecay = ws.getFilterEnvelope().getDecayTime();
-                filterEnvSustain = ws.getFilterEnvelope().getSustainLevel();
+                filterEnvSustain = ws.getFilterEnvSustain();
                 filterEnvRelease = ws.getFilterEnvelope().getReleaseTime();
                 // Amplitude envelope
                 ampEnvAttack = ws.getAmpEnvelope().getAttackTime();
@@ -96,6 +103,8 @@ struct ProgramData {
                 // Tremolo
                 tremoloRate = ws.getTremoloRate();
                 tremoloDepth = ws.getTremoloDepth();
+                // Voice level
+                level = ws.getLevel();
                 // Aftertouch modulation
                 baseCutoff_atMod = ws.getBaseCutoffAtMod();
                 filterEnvAmount_atMod = ws.getFilterEnvAmountAtMod();
@@ -105,6 +114,8 @@ struct ProgramData {
                 filterQ_atMod = ws.getFilterQAtMod();
                 vibratoRate_atMod = ws.getVibratoRateAtMod();
                 tremoloRate_atMod = ws.getTremoloRateAtMod();
+                filterEnvSustain_atMod = ws.getFilterEnvSustainAtMod();
+                level_atMod = ws.getLevelAtMod();
                 pitchBend_atMod = ws.getPitchBendAtMod();
                 captured = true;
             }
@@ -133,7 +144,7 @@ inline void applyProgramToVoices(const ProgramData& program, VoiceIterator forEa
         ws.setFilterEnvelopeAmount(program.filterEnvAmount);
         ws.getFilterEnvelope().setAttackTime(program.filterEnvAttack);
         ws.getFilterEnvelope().setDecayTime(program.filterEnvDecay);
-        ws.getFilterEnvelope().setSustainLevel(program.filterEnvSustain);
+        ws.setFilterEnvSustain(program.filterEnvSustain);
         ws.getFilterEnvelope().setReleaseTime(program.filterEnvRelease);
         
         // Apply amplitude envelope settings
@@ -149,7 +160,10 @@ inline void applyProgramToVoices(const ProgramData& program, VoiceIterator forEa
         // Apply tremolo settings
         ws.setTremoloRate(program.tremoloRate);
         ws.setTremoloDepth(program.tremoloDepth);
-        
+
+        // Apply voice level
+        ws.setLevel(program.level);
+
         // Apply aftertouch modulation settings
         ws.setBaseCutoffAtMod(program.baseCutoff_atMod);
         ws.setFilterEnvAmountAtMod(program.filterEnvAmount_atMod);
@@ -159,6 +173,8 @@ inline void applyProgramToVoices(const ProgramData& program, VoiceIterator forEa
         ws.setFilterQAtMod(program.filterQ_atMod);
         ws.setVibratoRateAtMod(program.vibratoRate_atMod);
         ws.setTremoloRateAtMod(program.tremoloRate_atMod);
+        ws.setFilterEnvSustainAtMod(program.filterEnvSustain_atMod);
+        ws.setLevelAtMod(program.level_atMod);
         ws.setPitchBendAtMod(program.pitchBend_atMod);
     });
 }
@@ -176,9 +192,10 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ProgramData,
     ampEnvAttack, ampEnvDecay, ampEnvSustain, ampEnvRelease,
     vibratoRate, vibratoDepth,
     tremoloRate, tremoloDepth,
+    level,
     baseCutoff_atMod, filterEnvAmount_atMod, vibratoDepth_atMod, tremoloDepth_atMod,
     waveformShape_atMod, filterQ_atMod, vibratoRate_atMod, tremoloRate_atMod,
-    pitchBend_atMod)
+    filterEnvSustain_atMod, level_atMod, pitchBend_atMod)
 
 } // namespace midi
 

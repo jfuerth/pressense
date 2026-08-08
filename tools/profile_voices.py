@@ -64,9 +64,12 @@ def set_param(ser, name, value):
 FULL_MODULATION = {
     "vibratoDepth": 0.5, "tremoloDepth": 0.5,
     "baseCutoff_atMod": 0.6, "filterQ_atMod": 0.4, "filterEnvAmount_atMod": 0.5,
+    "filterEnvSustain_atMod": 0.4,
     "vibratoDepth_atMod": 0.5, "vibratoRate_atMod": 0.4,
     "tremoloDepth_atMod": 0.5, "tremoloRate_atMod": 0.4,
-    "waveformShape_atMod": 0.5, "pitchBend_atMod": 2.0,
+    # Level defaults to unity, so only a negative atMod actually moves it - a
+    # positive one would clamp immediately and measure nothing.
+    "waveformShape_atMod": 0.5, "level_atMod": -0.3, "pitchBend_atMod": 2.0,
 }
 
 

@@ -22,10 +22,13 @@ window.controlPanel = (function() {
         filterEnvAmount: { min: 0, max: 1, label: 'Env Amount', unit: '', hasAtMod: true },
         filterEnvAttack: { min: 0.001, max: 2, label: 'Attack', unit: 's', log: true, hasAtMod: false },
         filterEnvDecay: { min: 0.01, max: 5, label: 'Decay', unit: 's', log: true, hasAtMod: false },
-        filterEnvSustain: { min: 0, max: 1, label: 'Sustain', unit: '', hasAtMod: false },
+        filterEnvSustain: { min: 0, max: 1, label: 'Sustain', unit: '', hasAtMod: true },
         filterEnvRelease: { min: 0.01, max: 5, label: 'Release', unit: 's', log: true, hasAtMod: false },
         
-        // Amp Envelope
+        // Amplifier. Level is the voice's gain into the shared clipper, so it is
+        // also the headroom control: turning it down is what makes room for
+        // polyphony. 1.0 is unity.
+        level: { min: 0, max: 1, label: 'Level', unit: '', hasAtMod: true },
         ampEnvAttack: { min: 0.001, max: 2, label: 'Attack', unit: 's', log: true, hasAtMod: false },
         ampEnvDecay: { min: 0.01, max: 5, label: 'Decay', unit: 's', log: true, hasAtMod: false },
         ampEnvSustain: { min: 0, max: 1, label: 'Sustain', unit: '', hasAtMod: false },
@@ -39,9 +42,10 @@ window.controlPanel = (function() {
         tremoloRate: { min: 0.1, max: 20, label: 'Rate', unit: 'Hz', hasAtMod: true },
         tremoloDepth: { min: 0, max: 1, label: 'Depth', unit: '', hasAtMod: true },
 
-        // Pitch bend: aftertouch-only. No primary knob (pitch bend itself comes
-        // from the MIDI wheel); the AT-Mod knob sets how many semitones full
-        // pressure bends the pitch. Range/unit differ from the default [-1,1].
+        // Pitch bend: aftertouch-only, and in a section of its own. No primary
+        // knob (pitch bend itself comes from the MIDI wheel); the AT-Mod knob
+        // sets how many semitones full pressure bends the pitch. Range/unit
+        // differ from the default [-1,1].
         pitchBend: { label: 'Pitch Bend', hasAtMod: true, atModOnly: true,
                      atModMin: -12, atModMax: 12, atModUnit: 'st', atModStep: 1 }
     };
@@ -61,8 +65,10 @@ window.controlPanel = (function() {
     // "Aftertouch Modulation Amounts" section.
     const AT_MOD_PARAMS = [
         'waveformShape_atMod', 'baseCutoff_atMod', 'filterQ_atMod',
-        'filterEnvAmount_atMod', 'vibratoRate_atMod', 'vibratoDepth_atMod',
-        'tremoloRate_atMod', 'tremoloDepth_atMod', 'pitchBend_atMod'
+        'filterEnvAmount_atMod', 'filterEnvSustain_atMod',
+        'vibratoRate_atMod', 'vibratoDepth_atMod',
+        'tremoloRate_atMod', 'tremoloDepth_atMod',
+        'level_atMod', 'pitchBend_atMod'
     ];
     
     // Current parameter values
@@ -94,9 +100,9 @@ window.controlPanel = (function() {
         
         const label = document.createElement('div');
         label.className = 'knob-label';
-        // A standalone (atModOnly) AT knob shows its own name; a paired one is
-        // just labelled "AT Mod" beneath its primary knob.
-        label.textContent = isAtMod ? (config.atModOnly ? config.label : 'AT Mod') : config.label;
+        // Every AT knob is labelled "AT Mod", including one with no primary knob
+        // (atModOnly) - its section header carries the parameter name.
+        label.textContent = isAtMod ? 'AT Mod' : config.label;
         
         const knobWrapper = document.createElement('div');
         knobWrapper.className = 'knob-wrapper';
@@ -486,10 +492,16 @@ window.controlPanel = (function() {
         const groups = [
             { title: 'Aftertouch', params: ['aftertouchMinRatio', 'aftertouchMaxRatio'] },
             { title: 'Oscillator', params: ['waveformShape'] },
+            // Pitch bend sits with the sound source rather than with Vibrato:
+            // it shifts the oscillator's pitch directly under pressure, with no
+            // LFO involved.
+            { title: 'Pitch Bend', params: ['pitchBend'] },
             { title: 'Filter', params: ['baseCutoff', 'filterQ'] },
             { title: 'Filter Envelope', params: ['filterEnvAmount', 'filterEnvAttack', 'filterEnvDecay', 'filterEnvSustain', 'filterEnvRelease'] },
-            { title: 'Amp Envelope', params: ['ampEnvAttack', 'ampEnvDecay', 'ampEnvSustain', 'ampEnvRelease'] },
-            { title: 'Vibrato', params: ['vibratoRate', 'vibratoDepth', 'pitchBend'] },
+            // Level joins the amp envelope as the VCA section: both shape the
+            // same gain stage.
+            { title: 'Amplifier', params: ['level', 'ampEnvAttack', 'ampEnvDecay', 'ampEnvSustain', 'ampEnvRelease'] },
+            { title: 'Vibrato', params: ['vibratoRate', 'vibratoDepth'] },
             { title: 'Tremolo', params: ['tremoloRate', 'tremoloDepth'] },
         ];
         

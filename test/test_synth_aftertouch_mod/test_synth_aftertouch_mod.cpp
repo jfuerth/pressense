@@ -2,13 +2,16 @@
 #include <sawtooth_synth.hpp>
 #include <performance_timer.hpp>
 
-// Aftertouch modulation of waveform shape, resonance, and the vibrato/tremolo
-// rates. These four parameters live inside sub-components (oscillator, filter,
-// LFOs) rather than in the voice, so the voice caches their baselines: while a
-// key is held the component holds the *modulated* value, and the getters must
-// still report the unmodulated one. Program save and the control panel depend on
-// that split, so it is what these tests pin down, alongside the modulation
-// itself reaching the component.
+// Aftertouch modulation of waveform shape, resonance, the vibrato/tremolo rates,
+// and the filter envelope's sustain level. These parameters live inside
+// sub-components (oscillator, filter, LFOs, envelope) rather than in the voice,
+// so the voice caches their baselines: while a key is held the component holds
+// the *modulated* value, and the getters must still report the unmodulated one.
+// Program save and the control panel depend on that split, so it is what these
+// tests pin down, alongside the modulation itself reaching the component.
+//
+// Voice level is the exception: it is a gain in the final multiply with no
+// component behind it, so it is verified from the rendered audio instead.
 
 static constexpr float SAMPLE_RATE = 48000.0f;
 static constexpr float BASE_FREQ = 440.0f;
@@ -27,6 +30,7 @@ static constexpr int SETTLE_SAMPLES = 8;
 static constexpr float SHAPE_TOLERANCE = 0.005f;                                  // eps 0.002
 static constexpr float Q_TOLERANCE = 0.03f * (Synth::FILTER_Q_MAX - Synth::FILTER_Q_MIN) + 0.05f;
 static constexpr float RATE_TOLERANCE = 0.02f;                                    // eps 0.01
+static constexpr float SUSTAIN_TOLERANCE = 0.005f;                                // eps 0.002
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -206,6 +210,112 @@ void test_lfoRates_clampedToSpan(void) {
         voice.getTremoloLfo().getRate(), "Tremolo rate should clamp at the bottom of the span");
 }
 
+// ===== Filter envelope sustain =====
+
+// Additive over the sustain level's own [0, 1] span. Same baseline/component
+// split as shape and resonance: the envelope holds the modulated level while the
+// getter keeps reporting the patch value.
+void test_filterEnvSustain_modulatedByPressure(void) {
+    Synth voice(SAMPLE_RATE);
+    voice.setFilterEnvSustain(0.3f);
+    voice.setFilterEnvSustainAtMod(0.5f);
+    play(voice, 1.0f);
+    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(SUSTAIN_TOLERANCE, 0.8f,
+        voice.getFilterEnvelope().getSustainLevel(),
+        "Full pressure at atMod 0.5 should add half the sustain span");
+    TEST_ASSERT_EQUAL_FLOAT_MESSAGE(0.3f, voice.getFilterEnvSustain(),
+        "Sustain baseline should be unchanged by aftertouch");
+}
+
+void test_filterEnvSustain_interpolatesWithPressure(void) {
+    Synth voice(SAMPLE_RATE);
+    voice.setFilterEnvSustain(0.3f);
+    voice.setFilterEnvSustainAtMod(0.5f);
+    play(voice, 0.5f);
+    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(SUSTAIN_TOLERANCE, 0.55f,
+        voice.getFilterEnvelope().getSustainLevel(),
+        "Half pressure should add a quarter of the sustain span");
+}
+
+void test_filterEnvSustain_clampedToSpan(void) {
+    Synth voice(SAMPLE_RATE);
+    voice.setFilterEnvSustain(0.8f);
+    voice.setFilterEnvSustainAtMod(1.0f);   // 0.8 + 1.0 overshoots
+    play(voice, 1.0f);
+    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(SUSTAIN_TOLERANCE, 1.0f,
+        voice.getFilterEnvelope().getSustainLevel(),
+        "Sustain overshoot should clamp at 1.0");
+
+    Synth quiet(SAMPLE_RATE);
+    quiet.setFilterEnvSustain(0.2f);
+    quiet.setFilterEnvSustainAtMod(-1.0f);  // 0.2 - 1.0 undershoots
+    play(quiet, 1.0f);
+    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(SUSTAIN_TOLERANCE, 0.0f,
+        quiet.getFilterEnvelope().getSustainLevel(),
+        "Downward sustain modulation should clamp at 0.0, never going negative");
+}
+
+// ===== Voice level =====
+
+// Level is a gain in the final multiply rather than a value pushed into a
+// component, so it can only be measured from the rendered audio. Everything else
+// that touches amplitude is flattened first: a wide-open cutoff and no filter
+// envelope leave the filter near unity at 440 Hz, and an amp envelope with zero
+// times sits at full sustain within two samples. What is left is oscillator x
+// level, and since trigger() resets the oscillator phase, two runs are directly
+// comparable.
+static float peakAmplitude(float level, float levelAtMod, float aftertouch) {
+    Synth voice(SAMPLE_RATE);
+    voice.setBaseCutoff(20000.0f);
+    voice.setFilterEnvelopeAmount(0.0f);
+    voice.getAmpEnvelope().setParameters(0.0f, 0.0f, 1.0f, 0.1f);
+    voice.setLevel(level);
+    voice.setLevelAtMod(levelAtMod);
+    voice.trigger(BASE_FREQ, 1.0f);
+    voice.setAftertouch(aftertouch);   // after trigger(), which zeroes pressure
+
+    SynthTimer timer;
+    float peak = 0.0f;
+    for (int i = 0; i < 400; ++i) {    // > 3 periods of 440 Hz at 48 kHz
+        float s = voice.nextSample(timer);
+        float magnitude = (s < 0.0f) ? -s : s;
+        if (magnitude > peak) peak = magnitude;
+    }
+    return peak;
+}
+
+void test_level_pressureRaisesAmplitude(void) {
+    float quiet = peakAmplitude(0.5f, 0.5f, 0.0f);
+    float loud = peakAmplitude(0.5f, 0.5f, 1.0f);
+    TEST_ASSERT_TRUE_MESSAGE(quiet > 0.01f, "Sanity: the unpressed note should sound");
+    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.05f, 2.0f, loud / quiet,
+        "Full pressure at atMod 0.5 should take level 0.5 to unity: twice as loud");
+}
+
+void test_level_interpolatesWithPressure(void) {
+    float quiet = peakAmplitude(0.5f, 0.5f, 0.0f);
+    float mid = peakAmplitude(0.5f, 0.5f, 0.5f);
+    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.05f, 1.5f, mid / quiet,
+        "Half pressure should add half of the modulation: 0.5 -> 0.75");
+}
+
+// Pressure can duck a voice to silence, which is what a negative atMod is for.
+void test_level_negativeAtModDucksToSilence(void) {
+    float open = peakAmplitude(1.0f, 0.0f, 0.0f);
+    float ducked = peakAmplitude(1.0f, -1.0f, 1.0f);
+    TEST_ASSERT_TRUE_MESSAGE(ducked < open * 0.01f,
+        "Full pressure at atMod -1.0 should mute the voice");
+}
+
+// Modulation cannot push the voice past unity - that would be a headroom grab
+// the patch never asked for, and the clipper is the place for that.
+void test_level_clampedToUnity(void) {
+    float unity = peakAmplitude(1.0f, 0.0f, 0.0f);
+    float overshot = peakAmplitude(0.8f, 1.0f, 1.0f);   // 0.8 + 1.0 overshoots
+    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(unity * 0.02f, unity, overshot,
+        "Level overshoot should clamp at unity");
+}
+
 // ===== Note lifecycle =====
 
 // A new note starts at zero pressure, so it must not inherit the previous note's
@@ -215,10 +325,12 @@ void test_trigger_returnsComponentsToBaseline(void) {
     Synth voice(SAMPLE_RATE);
     voice.setWaveformShape(0.2f);
     voice.setFilterQ(3.0f);
+    voice.setFilterEnvSustain(0.25f);
     voice.setVibratoRate(4.0f);
     voice.setTremoloRate(4.0f);
     voice.setWaveformShapeAtMod(1.0f);
     voice.setFilterQAtMod(1.0f);
+    voice.setFilterEnvSustainAtMod(1.0f);
     voice.setVibratoRateAtMod(1.0f);
     voice.setTremoloRateAtMod(1.0f);
 
@@ -231,6 +343,8 @@ void test_trigger_returnsComponentsToBaseline(void) {
         "A new note should start from the baseline shape");
     TEST_ASSERT_EQUAL_FLOAT_MESSAGE(3.0f, voice.getFilter().getQ(),
         "A new note should start from the baseline resonance");
+    TEST_ASSERT_EQUAL_FLOAT_MESSAGE(0.25f, voice.getFilterEnvelope().getSustainLevel(),
+        "A new note should start from the baseline filter env sustain");
     TEST_ASSERT_EQUAL_FLOAT_MESSAGE(4.0f, voice.getVibratoLfo().getRate(),
         "A new note should start from the baseline vibrato rate");
     TEST_ASSERT_EQUAL_FLOAT_MESSAGE(4.0f, voice.getTremoloLfo().getRate(),
@@ -298,6 +412,20 @@ void test_baselineSetters_clampOutOfRangeValues(void) {
     voice.setTremoloRate(0.0f);
     TEST_ASSERT_EQUAL_FLOAT_MESSAGE(Synth::LFO_RATE_MIN, voice.getTremoloRate(),
         "Tremolo rate below the span should clamp");
+
+    voice.setFilterEnvSustain(2.0f);
+    TEST_ASSERT_EQUAL_FLOAT_MESSAGE(1.0f, voice.getFilterEnvSustain(),
+        "Filter env sustain above 1.0 should clamp");
+    voice.setFilterEnvSustain(-1.0f);
+    TEST_ASSERT_EQUAL_FLOAT_MESSAGE(0.0f, voice.getFilterEnvSustain(),
+        "Filter env sustain below 0.0 should clamp");
+
+    voice.setLevel(2.0f);
+    TEST_ASSERT_EQUAL_FLOAT_MESSAGE(Synth::LEVEL_MAX, voice.getLevel(),
+        "Level above the span should clamp");
+    voice.setLevel(-1.0f);
+    TEST_ASSERT_EQUAL_FLOAT_MESSAGE(Synth::LEVEL_MIN, voice.getLevel(),
+        "Level below the span should clamp");
 }
 
 void RUN_UNITY_TESTS() {
@@ -314,6 +442,13 @@ void RUN_UNITY_TESTS() {
     RUN_TEST(test_vibratoRate_modulatedByPressure);
     RUN_TEST(test_tremoloRate_modulatedByPressure);
     RUN_TEST(test_lfoRates_clampedToSpan);
+    RUN_TEST(test_filterEnvSustain_modulatedByPressure);
+    RUN_TEST(test_filterEnvSustain_interpolatesWithPressure);
+    RUN_TEST(test_filterEnvSustain_clampedToSpan);
+    RUN_TEST(test_level_pressureRaisesAmplitude);
+    RUN_TEST(test_level_interpolatesWithPressure);
+    RUN_TEST(test_level_negativeAtModDucksToSilence);
+    RUN_TEST(test_level_clampedToUnity);
     RUN_TEST(test_trigger_returnsComponentsToBaseline);
     RUN_TEST(test_releasingPressure_returnsComponentsToBaseline);
     RUN_TEST(test_baselineSetters_applyWithoutRendering);
