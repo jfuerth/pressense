@@ -14,9 +14,12 @@ window.controlPanel = (function() {
         // Oscillator
         waveformShape: { min: 0, max: 1, label: 'Waveform', unit: '', hasAtMod: true },
 
-        // Filter
+        // Filter. Mode is a discrete choice: `labels` makes a knob step between
+        // named positions instead of showing a number.
         baseCutoff: { min: 20, max: 20000, label: 'Cutoff', unit: 'Hz', log: true, hasAtMod: true },
         filterQ: { min: 0.1, max: 20, label: 'Resonance', unit: '', hasAtMod: true },
+        filterMode: { min: 0, max: 4, step: 1, label: 'Mode', hasAtMod: false,
+                      labels: ['LP', 'HP', 'BP', 'Notch', 'AP'] },
         
         // Filter Envelope
         filterEnvAmount: { min: 0, max: 1, label: 'Env Amount', unit: '', hasAtMod: true },
@@ -47,7 +50,16 @@ window.controlPanel = (function() {
         // sets how many semitones full pressure bends the pitch. Range/unit
         // differ from the default [-1,1].
         pitchBend: { label: 'Pitch Bend', hasAtMod: true, atModOnly: true,
-                     atModMin: -12, atModMax: 12, atModUnit: 'st', atModStep: 1 }
+                     atModMin: -12, atModMax: 12, atModUnit: 'st', atModStep: 1 },
+
+        // Output stage: one shared stage after the voice mix, so unlike
+        // everything above these are global and are NOT saved with a program.
+        // Drive is the input gain into the clipper; voice Level stacks with it.
+        drive: { min: 0, max: 1, label: 'Drive', unit: '', hasAtMod: false },
+        outputMode: { min: 0, max: 2, step: 1, label: 'Clipping', hasAtMod: false,
+                      labels: ['Tanh', 'Fold', 'Soft Fold'] },
+        postFilterCutoff: { min: 100, max: 20000, label: 'Post LP', unit: 'Hz', log: true, hasAtMod: false },
+        postFilterQ: { min: 0.1, max: 20, label: 'Post Q', unit: '', hasAtMod: false }
     };
 
     // Aftertouch mod range defaults to [-1, 1] (a dimensionless depth). A base
@@ -262,8 +274,9 @@ window.controlPanel = (function() {
 
             // Snap to discrete detents if requested. Pitch bend uses whole
             // semitones so every target note is reachable; without this the knob
-            // is continuous and lands on values like 5.87 instead of 6.
-            const step = isAtMod ? config.atModStep : undefined;
+            // is continuous and lands on values like 5.87 instead of 6. The mode
+            // selectors use it to sit exactly on a named position.
+            const step = isAtMod ? config.atModStep : config.step;
             if (step) {
                 newValue = Math.round(newValue / step) * step;
             }
@@ -370,7 +383,13 @@ window.controlPanel = (function() {
         
         const config = PARAMS[paramName];
         if (!config) return value.toFixed(2);
-        
+
+        // Discrete params read as their position's name, not a number.
+        if (config.labels) {
+            const index = Math.round(value);
+            return config.labels[index] !== undefined ? config.labels[index] : String(index);
+        }
+
         if (config.unit === 'Hz' && value >= 1000) {
             return (value / 1000).toFixed(1) + 'k';
         } else if (config.unit === 's') {
@@ -496,13 +515,16 @@ window.controlPanel = (function() {
             // it shifts the oscillator's pitch directly under pressure, with no
             // LFO involved.
             { title: 'Pitch Bend', params: ['pitchBend'] },
-            { title: 'Filter', params: ['baseCutoff', 'filterQ'] },
+            { title: 'Filter', params: ['baseCutoff', 'filterQ', 'filterMode'] },
             { title: 'Filter Envelope', params: ['filterEnvAmount', 'filterEnvAttack', 'filterEnvDecay', 'filterEnvSustain', 'filterEnvRelease'] },
             // Level joins the amp envelope as the VCA section: both shape the
             // same gain stage.
             { title: 'Amplifier', params: ['level', 'ampEnvAttack', 'ampEnvDecay', 'ampEnvSustain', 'ampEnvRelease'] },
             { title: 'Vibrato', params: ['vibratoRate', 'vibratoDepth'] },
             { title: 'Tremolo', params: ['tremoloRate', 'tremoloDepth'] },
+            // Last, because it is where the signal ends up - and global: these
+            // four are not part of the program.
+            { title: 'Output (global)', params: ['drive', 'outputMode', 'postFilterCutoff', 'postFilterQ'] },
         ];
         
         for (const group of groups) {

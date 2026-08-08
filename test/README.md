@@ -15,7 +15,8 @@ platform):
 * test_common/ -- MIDI stream processing and note routing
 * test_voice_allocation/ -- real-time memory safety of the voice pool (see below)
 * test_synth_pitch/ -- aftertouch pitch-bend DSP path (renders audio, recovers the fundamental)
-* test_synth_aftertouch_mod/ -- aftertouch modulation of shape, resonance and the LFO rates, including the baseline/modulated-value split
+* test_synth_aftertouch_mod/ -- aftertouch modulation of shape, resonance, filter env sustain, voice level and the LFO rates, including the baseline/modulated-value split
+* test_midi_cc/ -- the CC assignment table: no colliding numbers, no misspelled parameter names, and the value curves (see below)
 * test_telemetry_json/ -- the allocation-free telemetry serialiser, checked against the nlohmann output it replaces
 
 The naming convention also reserves two platform-scoped categories for when
@@ -50,6 +51,20 @@ pio test -e waveshare_2350b
 
 Especially When running the native tests, just run the whole suite. It only takes a second or two
 and it's faster than running one group of tests at a time.
+
+## Testing the CC assignments
+
+`lib/midi/cc_map.hpp` maps CC numbers onto parameter names as data rather than as
+code, which makes two otherwise-silent mistakes testable: two parameters claiming
+the same CC number (one knob shadows the other), and a misspelled parameter name
+(the controller knob does nothing, with only a log line to say so).
+`test_midi_cc` asserts both, so adding an assignment that collides or does not
+resolve fails the suite instead of the hardware.
+
+It also drives a real `SynthApplication` over MIDI bytes, which is what pins down
+the four global output-stage parameters: those names are registered in
+`SynthApplication`, not in `WebController`, so a disagreement between the table
+and the registration would otherwise only show up when a knob was turned.
 
 ## Testing Real-Time Memory Safety
 

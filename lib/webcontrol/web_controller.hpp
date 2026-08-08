@@ -196,6 +196,18 @@ public:
         externalParams_.push_back({name, std::move(setter), std::move(getter)});
     }
 
+    /**
+     * @brief Apply a parameter by name, exactly as a setParam command would
+     *
+     * Shared with the MIDI CC path (see midi/cc_map.hpp) so that a CC and the
+     * knob for the same parameter cannot drift apart: both end up here.
+     *
+     * @return false if the name matches no known parameter
+     */
+    bool applyNamedParam(const std::string& name, float value) {
+        return setParameter(name, value);
+    }
+
 private:
     bool handleSetParam(const nlohmann::json& j) {
         if (!j.contains("param") || !j.contains("value")) {
@@ -283,8 +295,9 @@ private:
 
     /**
      * @brief Set a synth parameter by name
+     * @return false if the name matches no known parameter
      */
-    void setParameter(const std::string& param, float value) {
+    bool setParameter(const std::string& param, float value) {
         // Oscillator
         if (param == "waveformShape") {
             forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setWaveformShape(value); });
@@ -297,7 +310,13 @@ private:
             forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setFilterQ(value); });
         }
         else if (param == "filterMode") {
-            int mode = static_cast<int>(value);
+            // Rounded and clamped rather than truncated: a CC sweep or a knob
+            // lands on fractional values, and truncation would make the top mode
+            // reachable only at the exact maximum.
+            int mode = static_cast<int>(value + 0.5f);
+            const int lastMode = static_cast<int>(synth::BiquadFilter::Mode::__COUNT) - 1;
+            if (mode < 0) mode = 0;
+            if (mode > lastMode) mode = lastMode;
             forEachWavetableSynth([mode](synth::WavetableSynth& v) { v.getFilter().setMode(static_cast<synth::BiquadFilter::Mode>(mode)); });
         }
         // Filter envelope
@@ -381,10 +400,13 @@ private:
         else if (param == "pitchBend_atMod") {
             forEachWavetableSynth([value](synth::WavetableSynth& v) { v.setPitchBendAtMod(value); });
         }
-        // Externally-registered params (e.g. keyboard aftertouch range)
+        // Externally-registered params (e.g. keyboard aftertouch range, and the
+        // output stage, which SynthApplication registers)
         else if (!applyExternalParam(param, value)) {
             logWarn("Unknown parameter: %s", param.c_str());
+            return false;
         }
+        return true;
     }
 
     /**

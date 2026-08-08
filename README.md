@@ -30,6 +30,45 @@ High-level architecture, from input side to output side:
   * The Linux implementation outputs to ALSA (useful for embedded Linux projects)
   * Future: probably should include an option for Pipewire or JACK
 
+## Control surfaces
+
+Every continuous parameter is reachable two ways, and both end up in the same
+place (`WebController::setParameter`), so a CC and its knob cannot drift apart:
+
+* **The HTML control panel** (`tools/pressence_ui.html`) over the serial link,
+  using JSON `setParam` commands with float values. This is the precise path:
+  full float resolution, and `getParams` reads values back so the knobs show what
+  the device actually holds.
+* **MIDI Control Change**, for a hardware controller. 7-bit and write-only, so
+  values are quantised to 128 steps and nothing is read back.
+
+CC assignments live in one table, `lib/midi/cc_map.hpp`, which is the reference —
+`test_midi_cc` asserts the numbers don't collide and that every name in it is one
+the synth recognises. In summary:
+
+| CC | Parameter | CC | Parameter |
+|----|-----------|----|-----------|
+| 1 | Waveform shape | 63 | Post-filter resonance *(global)* |
+| 20 | Filter cutoff | 70 | Post-filter cutoff *(global)* |
+| 21 | Filter resonance | 71–73 | Filter env attack / decay / release |
+| 22 | Filter env amount | 74 | Output drive *(global)* |
+| 23 | Voice level | 85–86 | Tremolo rate / depth |
+| 24 | Filter mode | 87 | Clipping algorithm *(global)* |
+| 25 | Filter env sustain | 96 | Cycle filter mode (on press) |
+| 26–29 | Amp env attack / decay / sustain / release | 102 | Cycle clipping algorithm (on press) |
+| 30–31 | Vibrato rate / depth | 103–104 | Copy / paste patch (native builds) |
+| 105–115 | Aftertouch modulation amounts, centred at CC 64 | | |
+
+CCs 1, 20, 21, 25 and 63–74 were chosen years ago to match the knob positions on
+a particular M-Audio controller, so they follow no pattern. Everything added since
+sits in ranges the MIDI spec leaves undefined, avoiding sustain, volume,
+expression, bank select and NRPN/RPN data entry. CCs 120 and up never arrive:
+`StreamProcessor` filters channel-mode messages out before the callback.
+
+Parameters marked *(global)* belong to the shared output stage rather than to a
+voice. They are **not** saved with a program, so a program change can't jump the
+master drive; they reset to their defaults on reboot.
+
 ## Code organization
 
 (See also: [CODING_STANDARDS.md] for more detailed rules about use of macros, error handling, and so on.)

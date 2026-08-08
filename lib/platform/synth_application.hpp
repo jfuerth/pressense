@@ -2,6 +2,7 @@
 
 #include <sawtooth_synth.hpp>
 #include <stream_processor.hpp>
+#include <cc_map.hpp>
 #include <web_controller.hpp>
 #include <polyphonic_synth_target.hpp>
 #include <output_processor.hpp>
@@ -91,6 +92,8 @@ public:
         webController_->setMidiByteCallback([this](uint8_t byte) {
             midiProcessor_->process(byte);
         });
+
+        registerOutputStageParams();
     }
     
     /**
@@ -204,6 +207,14 @@ public:
      * @brief Get the voice pool for direct access (e.g., for program loading)
      */
     VoicePool& getVoicePool() { return *voicePool_; }
+
+    /**
+     * @brief Get the shared output stage (drive, clipping algorithm, post-filter)
+     *
+     * Global, unlike everything on a voice: one stage for the whole mix, and not
+     * part of a program.
+     */
+    synth::OutputProcessor& getOutputProcessor() { return outputProcessor_; }
     
 #ifdef FEATURE_CLIPBOARD
     void setClipboard(std::unique_ptr<features::Clipboard> clipboard) {
@@ -212,66 +223,54 @@ public:
 #endif
 
 private:
+    /**
+     * @brief Expose the output stage to the control panel
+     *
+     * The output processor is one shared stage rather than a per-voice setting,
+     * so WebController - which only knows how to reach voices - cannot see it.
+     * Registering it here gives the panel knobs for drive, the post-filter and
+     * the clipping algorithm, and lets the CC table address them by name. These
+     * are deliberately *not* part of ProgramData: they are global, so a program
+     * change must not be able to jump the master drive.
+     */
+    void registerOutputStageParams() {
+        webController_->registerParam("drive",
+            [this](float v) { outputProcessor_.setDrive(v); },
+            [this]() { return outputProcessor_.getDrive(); });
+
+        webController_->registerParam("postFilterCutoff",
+            [this](float v) { outputProcessor_.getPostFilter().setCutoff(v); },
+            [this]() { return outputProcessor_.getPostFilter().getCutoff(); });
+
+        webController_->registerParam("postFilterQ",
+            [this](float v) { outputProcessor_.getPostFilter().setQ(v); },
+            [this]() { return outputProcessor_.getPostFilter().getQ(); });
+
+        // Rounded, not truncated, for the same reason as filterMode: a CC sweep
+        // or a knob arrives fractional.
+        webController_->registerParam("outputMode",
+            [this](float v) {
+                int index = static_cast<int>(v + 0.5f);
+                if (index < 0) index = 0;
+                outputProcessor_.setModeIndex(static_cast<size_t>(index));
+            },
+            [this]() { return static_cast<float>(outputProcessor_.getModeIndex()); });
+    }
+
     void handleCC(uint8_t channel, uint8_t cc, uint8_t value) {
         float normalized = static_cast<float>(value) / 127.0f;
-        
+
+        // Continuous parameters are table-driven (midi/cc_map.hpp) and applied
+        // through the same entry point the control panel uses, so a CC and its
+        // knob cannot disagree about what the parameter means.
+        if (const midi::CcMapping* mapping = midi::findCcMapping(cc)) {
+            webController_->applyNamedParam(mapping->param,
+                                            midi::ccValueToParam(*mapping, value));
+            return;
+        }
+
+        // What is left are the presses: cycling a mode, or copying a patch.
         switch(cc) {
-            case 1: // Modulation wheel -> waveform shape
-                voicePool_->forEachVoice([normalized](synth::WavetableSynth& voice) {
-                    voice.setWaveformShape(normalized);
-                });
-                break;
-            case 20: { // Filter cutoff (exponential 100Hz - 10kHz)
-                    const float MIN_CUTOFF = 100.0f;
-                    const float MAX_CUTOFF = 10000.0f;
-                    float cutoff = MIN_CUTOFF * std::pow(MAX_CUTOFF / MIN_CUTOFF, normalized);
-                    voicePool_->forEachVoice([cutoff](synth::WavetableSynth& voice) {
-                        voice.setBaseCutoff(cutoff);
-                    });
-                }
-                break;
-            case 21: // Filter resonance (Q 0.1 - 20.0)
-                voicePool_->forEachVoice([normalized](synth::WavetableSynth& voice) {
-                    voice.setFilterQ(synth::WavetableSynth::FILTER_Q_MIN + normalized *
-                        (synth::WavetableSynth::FILTER_Q_MAX - synth::WavetableSynth::FILTER_Q_MIN));
-                });
-                break;
-            case 71: // Filter envelope attack (1ms - 2s)
-                voicePool_->forEachVoice([normalized](synth::WavetableSynth& voice) {
-                    float attackTime = 0.001f + normalized * 2.0f;
-                    voice.getFilterEnvelope().setAttackTime(attackTime);
-                });
-                break;
-            case 72: // Filter envelope decay (10ms - 5s)
-                voicePool_->forEachVoice([normalized](synth::WavetableSynth& voice) {
-                    float decayTime = 0.01f + normalized * 5.0f;
-                    voice.getFilterEnvelope().setDecayTime(decayTime);
-                });
-                break;
-            case 25: // Filter envelope sustain level
-                voicePool_->forEachVoice([normalized](synth::WavetableSynth& voice) {
-                    voice.setFilterEnvSustain(normalized);
-                });
-                break;
-            case 73: // Filter envelope release (10ms - 5s)
-                voicePool_->forEachVoice([normalized](synth::WavetableSynth& voice) {
-                    float releaseTime = 0.01f + normalized * 5.0f;
-                    voice.getFilterEnvelope().setReleaseTime(releaseTime);
-                });
-                break;
-            case 74: // Output drive
-                outputProcessor_.setDrive(normalized);
-                break;
-            case 70: {// Post-filter cutoff (100Hz - 20kHz)
-                    const float MIN_CUTOFF = 100.0f;
-                    const float MAX_CUTOFF = 20000.0f;
-                    float cutoff = MIN_CUTOFF * std::pow(MAX_CUTOFF / MIN_CUTOFF, normalized);
-                    outputProcessor_.getPostFilter().setCutoff(cutoff);
-                }
-                break;
-            case 63: // Post-filter resonance
-                outputProcessor_.getPostFilter().setQ(0.1f + normalized * 19.9f);
-                break;
             case 96: {// Cycle filter mode
                     if (normalized > 0.5f) {
                         synth::BiquadFilter::Mode newMode;
