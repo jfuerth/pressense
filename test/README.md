@@ -17,6 +17,7 @@ platform):
 * test_synth_pitch/ -- aftertouch pitch-bend DSP path (renders audio, recovers the fundamental)
 * test_synth_aftertouch_mod/ -- aftertouch modulation of shape, resonance, filter env sustain, voice level and the LFO rates, including the baseline/modulated-value split
 * test_midi_cc/ -- the CC assignment table: no colliding numbers, no misspelled parameter names, and the value curves (see below)
+* test_web_commands/ -- control panel command handling, in particular that program save and load report what the storage actually did
 * test_telemetry_json/ -- the allocation-free telemetry serialiser, checked against the nlohmann output it replaces
 
 The naming convention also reserves two platform-scoped categories for when
@@ -65,6 +66,21 @@ It also drives a real `SynthApplication` over MIDI bytes, which is what pins dow
 the four global output-stage parameters: those names are registered in
 `SynthApplication`, not in `WebController`, so a disagreement between the table
 and the registration would otherwise only show up when a knob was turned.
+
+## Browser-side tests
+
+The control panel's patch storage has its own tests, which need no framework and
+no dependencies beyond node:
+
+```
+node tools/js/test_patch_storage.js
+```
+
+They are not part of `pio test` (PlatformIO only runs the C++ suites), so run them
+by hand when touching `tools/js/patch_storage.js`. They exist because the failure
+modes there lose someone's work quietly: a save that kept the global output-stage
+parameters would make loading a patch move the master drive, and an import that
+replaced the store rather than the slots it names would wipe every other patch.
 
 ## Testing Real-Time Memory Safety
 

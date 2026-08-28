@@ -231,8 +231,14 @@ private:
     bool handleSaveProgram(const nlohmann::json& j) {
         uint8_t bank = j.value("bank", 0);
         uint8_t program = j.value("program", 0);
-        
-        saveProgram(bank, program);
+
+        // Report what the storage actually did. This used to ack "ok"
+        // unconditionally, so a platform whose storage refuses to save - the
+        // embedded ones do - looked indistinguishable from a successful save.
+        if (!saveProgram(bank, program)) {
+            sendError("saveProgram: storage did not save this program");
+            return false;
+        }
         sendAck("saveProgram");
         return true;
     }
@@ -241,7 +247,10 @@ private:
         uint8_t bank = j.value("bank", 0);
         uint8_t program = j.value("program", 0);
         
-        loadProgram(bank, program);
+        if (!loadProgram(bank, program)) {
+            sendError("loadProgram: storage did not load this program");
+            return false;
+        }
         sendAck("loadProgram");
         return true;
     }
@@ -473,30 +482,40 @@ private:
     
     /**
      * @brief Save current settings to program slot
+     * @return false if there is no storage, or the storage declined to save
      */
-    void saveProgram(uint8_t bank, uint8_t program) {
-        if (programStorage_) {
-            uint8_t slot = bank * 8 + program;  // Simple slot calculation
-            programStorage_->saveProgram(slot, voiceIterator_);
-            logInfo("Saved program to bank %d, slot %d", bank, program);
-        } else {
+    bool saveProgram(uint8_t bank, uint8_t program) {
+        if (!programStorage_) {
             logWarn("No program storage available");
+            return false;
         }
+        uint8_t slot = bank * 8 + program;  // Simple slot calculation
+        if (!programStorage_->saveProgram(slot, voiceIterator_)) {
+            logWarn("Storage declined to save bank %d, slot %d", bank, program);
+            return false;
+        }
+        logInfo("Saved program to bank %d, slot %d", bank, program);
+        return true;
     }
-    
+
     /**
      * @brief Load settings from program slot
+     * @return false if there is no storage, or the storage declined to load
      */
-    void loadProgram(uint8_t bank, uint8_t program) {
-        if (programStorage_) {
-            uint8_t slot = bank * 8 + program;  // Simple slot calculation
-            programStorage_->loadProgram(slot, voiceIterator_);
-            logInfo("Loaded program from bank %d, slot %d", bank, program);
-            // Send updated params to control panel
-            sendCurrentParams();
-        } else {
+    bool loadProgram(uint8_t bank, uint8_t program) {
+        if (!programStorage_) {
             logWarn("No program storage available");
+            return false;
         }
+        uint8_t slot = bank * 8 + program;  // Simple slot calculation
+        if (!programStorage_->loadProgram(slot, voiceIterator_)) {
+            logWarn("Storage declined to load bank %d, slot %d", bank, program);
+            return false;
+        }
+        logInfo("Loaded program from bank %d, slot %d", bank, program);
+        // Send updated params to control panel
+        sendCurrentParams();
+        return true;
     }
     
     void sendAck(const std::string& cmd) {

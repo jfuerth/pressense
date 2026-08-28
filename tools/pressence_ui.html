@@ -463,12 +463,51 @@
             align-items: center;
         }
         
-        .program-controls select {
+        .program-controls select,
+        .program-controls input[type="text"] {
             background: #1e1e1e;
             color: #d4d4d4;
             border: 1px solid #3c3c3c;
             padding: 6px 10px;
             border-radius: 4px;
+        }
+
+        .program-controls input[type="text"] {
+            width: 12em;
+        }
+
+        /* Feedback for save/load, which previously happened silently. */
+        .patch-status {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #9cdcfe;
+            min-height: 1.2em;
+        }
+
+        .patch-status.error {
+            color: #e06c5a;
+        }
+
+        /* Hidden until Export or Import needs it - it is a transfer buffer, not
+           part of the everyday panel. */
+        .patch-transfer {
+            display: none;
+            width: 100%;
+            min-width: 20em;
+            height: 8em;
+            margin-top: 10px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            border: 1px solid #3c3c3c;
+            border-radius: 4px;
+            padding: 8px;
+            font-family: 'Consolas', monospace;
+            font-size: 11px;
+            resize: vertical;
+        }
+
+        .patch-transfer.visible {
+            display: block;
         }
         
         .program-controls button {
@@ -559,26 +598,25 @@
     <div class="tab-content active" id="tab-control">
         <div class="panel-flow">
             <div class="program-panel">
-                <h3>Program</h3>
+                <h3>Patches</h3>
                 <div class="program-controls">
-                    <label>Bank: <select id="bankSelect">
-                        <option value="0">0</option>
-                        <option value="1">1</option>
-                    </select></label>
-                    <label>Program: <select id="programSelect">
-                        <option value="0">0</option>
-                        <option value="1">1</option>
-                        <option value="2">2</option>
-                        <option value="3">3</option>
-                        <option value="4">4</option>
-                        <option value="5">5</option>
-                        <option value="6">6</option>
-                        <option value="7">7</option>
-                    </select></label>
-                    <button id="loadProgramBtn">Load</button>
-                    <button id="saveProgramBtn">Save</button>
+                    <label>Slot: <select id="patchSlotSelect"></select></label>
+                    <label>Name: <input type="text" id="patchNameInput" placeholder="Patch name" maxlength="32"></label>
+                    <button id="savePatchBtn">Save</button>
+                    <button id="loadPatchBtn">Load</button>
+                    <button id="deletePatchBtn">Delete</button>
                     <button id="refreshParamsBtn">Refresh</button>
                 </div>
+                <div class="program-controls">
+                    <button id="exportPatchesBtn">Export all</button>
+                    <button id="importPatchesBtn">Import…</button>
+                    <button id="loadDeviceDefaultBtn">Device default</button>
+                </div>
+                <!-- Save and Load never said whether they had done anything. Every
+                     action reports here now. -->
+                <div class="patch-status" id="patchStatus">Patches are stored in this browser.</div>
+                <textarea id="patchTransfer" class="patch-transfer" spellcheck="false"
+                          placeholder="Exported patches appear here. Paste a set in and press Import."></textarea>
             </div>
             <div class="program-panel">
                 <h3>Keyboard</h3>
@@ -595,6 +633,7 @@
     </div>
     
     <script src="js/serial_connection.js"></script>
+    <script src="js/patch_storage.js"></script>
     <script src="js/control_panel.js"></script>
     <script src="js/telemetry_panel.js"></script>
     <script>
@@ -649,22 +688,153 @@
             }
         });
         
-        // Program controls
-        document.getElementById('loadProgramBtn').addEventListener('click', () => {
-            const bank = parseInt(document.getElementById('bankSelect').value);
-            const program = parseInt(document.getElementById('programSelect').value);
-            serialManager.loadProgram(bank, program);
+        // ===== Patches =====
+        //
+        // Stored in this browser (tools/js/patch_storage.js). The device has no
+        // writable program storage, so these buttons used to do nothing at all.
+        const patchSlotSelect = document.getElementById('patchSlotSelect');
+        const patchNameInput = document.getElementById('patchNameInput');
+        const patchStatus = document.getElementById('patchStatus');
+        const patchTransfer = document.getElementById('patchTransfer');
+
+        function setPatchStatus(message, isError = false) {
+            patchStatus.textContent = message;
+            patchStatus.className = isError ? 'patch-status error' : 'patch-status';
+        }
+
+        function selectedSlot() {
+            return parseInt(patchSlotSelect.value, 10);
+        }
+
+        // Rebuild the slot list, keeping the current selection. Empty slots are
+        // listed too, so there is somewhere to save to.
+        function refreshSlotList() {
+            const previous = patchSlotSelect.value;
+            patchSlotSelect.innerHTML = '';
+            for (const entry of patchStorage.listSlots()) {
+                const option = document.createElement('option');
+                option.value = entry.slot;
+                option.textContent = entry.name
+                    ? `${entry.slot}: ${entry.name}`
+                    : `${entry.slot}: (empty)`;
+                patchSlotSelect.appendChild(option);
+            }
+            if (previous !== '') patchSlotSelect.value = previous;
+        }
+
+        // Selecting a slot offers its name for editing, so Save keeps the name
+        // unless it is deliberately changed.
+        patchSlotSelect.addEventListener('change', () => {
+            const patch = patchStorage.readPatch(selectedSlot());
+            patchNameInput.value = patch ? patch.name : '';
         });
-        
-        document.getElementById('saveProgramBtn').addEventListener('click', () => {
-            const bank = parseInt(document.getElementById('bankSelect').value);
-            const program = parseInt(document.getElementById('programSelect').value);
-            serialManager.saveProgram(bank, program);
+
+        document.getElementById('savePatchBtn').addEventListener('click', () => {
+            if (!serialManager.isConnected()) {
+                setPatchStatus('Connect to the device first - a patch is saved from what it reports.', true);
+                return;
+            }
+            const slot = selectedSlot();
+            const result = patchStorage.savePatch(slot, patchNameInput.value,
+                                                 controlPanel.getCurrentParams());
+            if (!result.ok) {
+                setPatchStatus(result.error, true);
+                return;
+            }
+            refreshSlotList();
+            patchSlotSelect.value = slot;
+            const count = Object.keys(result.patch.params).length;
+            setPatchStatus(`Saved "${result.patch.name}" to slot ${slot} (${count} parameters).`);
         });
-        
+
+        document.getElementById('loadPatchBtn').addEventListener('click', () => {
+            const slot = selectedSlot();
+            const patch = patchStorage.readPatch(slot);
+            if (!patch) {
+                setPatchStatus(`Slot ${slot} is empty.`, true);
+                return;
+            }
+            if (!serialManager.isConnected()) {
+                setPatchStatus('Connect to the device first.', true);
+                return;
+            }
+            const sent = controlPanel.applyParams(patch.params);
+            patchNameInput.value = patch.name;
+            // Have the device report back, so the knobs show what it holds
+            // rather than what we asked for.
+            serialManager.getParams();
+            setPatchStatus(`Loaded "${patch.name}" from slot ${slot} (${sent} parameters sent).`);
+        });
+
+        document.getElementById('deletePatchBtn').addEventListener('click', () => {
+            const slot = selectedSlot();
+            const patch = patchStorage.readPatch(slot);
+            if (!patch) {
+                setPatchStatus(`Slot ${slot} is already empty.`, true);
+                return;
+            }
+            const result = patchStorage.deletePatch(slot);
+            if (!result.ok) {
+                setPatchStatus(result.error, true);
+                return;
+            }
+            refreshSlotList();
+            patchSlotSelect.value = slot;
+            patchNameInput.value = '';
+            setPatchStatus(`Deleted "${patch.name}" from slot ${slot}.`);
+        });
+
+        document.getElementById('exportPatchesBtn').addEventListener('click', () => {
+            const json = patchStorage.exportAll();
+            patchTransfer.classList.add('visible');
+            patchTransfer.value = json;
+            patchTransfer.select();
+            const count = JSON.parse(json).length;
+            setPatchStatus(count > 0
+                ? `Exported ${count} patch(es) - copy the text below to keep or ship them.`
+                : 'Nothing saved yet, so there is nothing to export.', count === 0);
+        });
+
+        document.getElementById('importPatchesBtn').addEventListener('click', () => {
+            // First press reveals the box to paste into; second press imports it.
+            if (!patchTransfer.classList.contains('visible') || !patchTransfer.value.trim()) {
+                patchTransfer.classList.add('visible');
+                patchTransfer.value = '';
+                patchTransfer.focus();
+                setPatchStatus('Paste an exported patch set below, then press Import again.');
+                return;
+            }
+            const result = patchStorage.importAll(patchTransfer.value);
+            if (!result.ok) {
+                setPatchStatus(result.error, true);
+                return;
+            }
+            refreshSlotList();
+            setPatchStatus(`Imported ${result.imported} patch(es). Slots not mentioned were left alone.`);
+        });
+
+        // The device's own storage: one hardcoded program on the embedded
+        // builds, real files on Linux. Kept reachable as a way back to a known
+        // state, and it is the path a hardware panel will use once the device can
+        // write flash.
+        document.getElementById('loadDeviceDefaultBtn').addEventListener('click', () => {
+            if (!serialManager.isConnected()) {
+                setPatchStatus('Connect to the device first.', true);
+                return;
+            }
+            serialManager.loadProgram(0, 0);
+            setPatchStatus('Asked the device to load its own program 0 - watch the log for the result.');
+        });
+
         document.getElementById('refreshParamsBtn').addEventListener('click', () => {
             serialManager.getParams();
         });
+
+        const installed = patchStorage.installFactoryPatches();
+        refreshSlotList();
+        if (installed > 0) {
+            setPatchStatus(`Installed ${installed} factory patch(es) into empty slots.`);
+        }
         
         // Base note control
         const baseNoteSelect = document.getElementById('baseNoteSelect');

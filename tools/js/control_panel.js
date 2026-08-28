@@ -85,8 +85,16 @@ window.controlPanel = (function() {
     
     // Current parameter values
     let currentParams = {};
-    
-    // Debounce timer for parameter changes
+
+    // Parameter sends waiting to go out, keyed by name and flushed together.
+    //
+    // Keyed rather than a single pending value because there used to be one
+    // timer holding one parameter: moving a second knob inside the debounce
+    // window cancelled the first one's send outright, and its value never
+    // reached the device. Easy to hit, since two fingers on two knobs is
+    // explicitly supported (see setupKnobDrag), and easier still when a whole
+    // patch is applied at once.
+    const pendingParams = new Map();
     let sendTimer = null;
     const SEND_DELAY = 50; // ms
 
@@ -406,15 +414,32 @@ window.controlPanel = (function() {
      * Schedule parameter send with debouncing
      */
     function scheduleParamSend(paramName, value) {
+        pendingParams.set(paramName, value);
         if (sendTimer) {
             clearTimeout(sendTimer);
         }
-        
-        sendTimer = setTimeout(() => {
-            if (window.serialManager && window.serialManager.isConnected()) {
-                window.serialManager.setParam(paramName, value);
+        sendTimer = setTimeout(flushParamSends, SEND_DELAY);
+    }
+
+    /**
+     * Send everything that is pending, now.
+     * @returns {number} How many parameters went out
+     */
+    function flushParamSends() {
+        if (sendTimer) {
+            clearTimeout(sendTimer);
+            sendTimer = null;
+        }
+        const connected = window.serialManager && window.serialManager.isConnected();
+        let sent = 0;
+        if (connected) {
+            for (const [name, value] of pendingParams) {
+                window.serialManager.setParam(name, value);
+                ++sent;
             }
-        }, SEND_DELAY);
+        }
+        pendingParams.clear();
+        return sent;
     }
     
     /**
@@ -537,11 +562,54 @@ window.controlPanel = (function() {
         }
     }
     
+    /**
+     * The values the device last reported (plus anything moved since).
+     *
+     * A copy, so a caller storing it as a patch can't be surprised by later
+     * knob movement.
+     *
+     * @returns {Object} Parameter name -> value
+     */
+    function getCurrentParams() {
+        return Object.assign({}, currentParams);
+    }
+
+    /**
+     * Push a set of parameter values to the device and show them on the knobs.
+     *
+     * Sent as one immediate burst rather than through the debounce, which exists
+     * to thin out a knob drag and would otherwise delay a patch load by 50ms for
+     * no reason. Names with no knob here are still sent: the device is the
+     * authority on what parameters exist, and a patch saved by a newer panel
+     * may know about one this copy doesn't.
+     *
+     * The caller should follow up with getParams() to have the device confirm
+     * what it actually holds.
+     *
+     * @param {Object} params Parameter name -> value
+     * @returns {number} How many parameters were sent
+     */
+    function applyParams(params) {
+        for (const [name, value] of Object.entries(params || {})) {
+            if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+            const container = document.querySelector(`.knob-container[data-param="${name}"]`);
+            if (container) {
+                markKnobValue(container, name, value, name.endsWith('_atMod'));
+            } else {
+                currentParams[name] = value;
+            }
+            pendingParams.set(name, value);
+        }
+        return flushParamSends();
+    }
+
     // Public API
     return {
         PARAMS: PARAMS,
         init: init,
         updateFromDevice: updateFromDevice,
+        getCurrentParams: getCurrentParams,
+        applyParams: applyParams,
         createKnob: createKnob,
         createDualKnob: createDualKnob
     };
