@@ -53,6 +53,7 @@ public:
     
     inline void setSustainLevel(float level) { 
         sustainLevel_ = level; 
+        updateRates();  // the decay rate depends on the sustain level
     }
     
     inline void setReleaseTime(float time) { 
@@ -70,10 +71,15 @@ public:
     
     /**
      * @brief Release the envelope (start release phase)
+     *
+     * The level falls from wherever it is now (not necessarily the sustain
+     * level, if the note is released during attack or decay) to zero over
+     * the release time.
      */
     inline void release() {
         if (phase_ != Phase::IDLE) {
             phase_ = Phase::RELEASE;
+            updateReleaseRate();
         }
     }
     
@@ -161,7 +167,15 @@ private:
         // Calculate per-sample rates
         attackRate_ = (attackTime_ > 0.0f) ? (1.0f / (attackTime_ * sampleRate_)) : 1.0f;
         decayRate_ = (decayTime_ > 0.0f) ? ((1.0f - sustainLevel_) / (decayTime_ * sampleRate_)) : 1.0f;
-        releaseRate_ = (releaseTime_ > 0.0f) ? (sustainLevel_ / (releaseTime_ * sampleRate_)) : 1.0f;
+        // A release in progress continues from its current level at the new rate.
+        if (phase_ == Phase::RELEASE) {
+            updateReleaseRate();
+        }
+    }
+
+    // Fall from the current level to zero over the release time.
+    inline void updateReleaseRate() {
+        releaseRate_ = (releaseTime_ > 0.0f) ? (level_ / (releaseTime_ * sampleRate_)) : 1.0f;
     }
     
     float sampleRate_;
